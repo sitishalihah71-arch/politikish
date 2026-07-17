@@ -1,0 +1,327 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=1280, initial-scale=1.0">
+<title>POLITIK'ISH</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="app">
+
+  <div id="toast" class="toast" hidden></div>
+
+  <div class="global-corner-icons">
+    <button id="btn-sound-toggle" class="icon-btn" type="button" aria-label="Toggle sound" aria-pressed="false">
+      <svg class="icon icon-sound-on" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9v6h4l5 5V4L8 9H4z"/><path d="M16.5 8.5a5 5 0 0 1 0 7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M19 6a9 9 0 0 1 0 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+      <svg class="icon icon-sound-off" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9v6h4l5 5V4L8 9H4z"/><path d="M16 9l5 6M21 9l-5 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+    </button>
+    <button id="btn-open-settings" class="icon-btn" type="button" aria-label="Settings">
+      <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z" fill="none" stroke="currentColor" stroke-width="2"/><path d="M19.4 13a7.4 7.4 0 0 0 .1-1 7.4 7.4 0 0 0-.1-1l2-1.6-2-3.4-2.4 1a7.6 7.6 0 0 0-1.7-1L15 3h-4l-.3 2.6a7.6 7.6 0 0 0-1.7 1l-2.4-1-2 3.4L6.5 11a7.4 7.4 0 0 0-.1 1 7.4 7.4 0 0 0 .1 1l-2 1.6 2 3.4 2.4-1a7.6 7.6 0 0 0 1.7 1L11 21h4l.3-2.6a7.6 7.6 0 0 0 1.7-1l2.4 1 2-3.4-2-1.6z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
+    </button>
+  </div>
+
+  <section id="screen-main-menu" class="screen is-active" data-screen="main-menu">
+    <div class="menu-content">
+      <div class="menu-logo">
+        <h1 class="logo-text">POLITIK<span class="logo-accent">'ISH</span></h1>
+        <p class="logo-tagline">NAIK PANGKAT. KUMPUL DUIT. JANGAN KANTOI.</p>
+      </div>
+
+      <div class="menu-actions">
+        <button id="btn-create-room" class="menu-btn menu-btn-primary" type="button">
+          <span class="menu-btn-label">Create Room</span>
+          <span class="menu-btn-sub">Host a new match</span>
+        </button>
+        <button id="btn-join-room" class="menu-btn menu-btn-secondary" type="button">
+          <span class="menu-btn-label">Join Room</span>
+          <span class="menu-btn-sub">Enter a room code</span>
+        </button>
+      </div>
+    </div>
+
+    <p class="menu-footer">4 Players &middot; 10 Rounds &middot; One President</p>
+  </section>
+
+  <section id="screen-room-host" class="screen" data-screen="room-host">
+    <div class="room-panel">
+      <button class="link-back" id="btn-room-host-back" type="button">&larr; Back</button>
+
+      <div id="room-host-form-view" class="room-view">
+        <h2 class="room-title">Create Room</h2>
+        <label class="field-label" for="room-host-name">Your Name</label>
+        <input id="room-host-name" class="field-input" type="text" maxlength="16" placeholder="Enter your name" autocomplete="off">
+        <p id="room-host-error" class="field-error" hidden></p>
+        <button id="btn-room-host-submit" class="menu-btn menu-btn-primary" type="button">
+          <span class="menu-btn-label">Create Room</span>
+        </button>
+      </div>
+    </div>
+  </section>
+
+  <section id="screen-room-join" class="screen" data-screen="room-join">
+    <div class="room-panel">
+      <button class="link-back" id="btn-room-join-back" type="button">&larr; Back</button>
+
+      <div id="room-join-form-view" class="room-view">
+        <h2 class="room-title">Join Room</h2>
+        <label class="field-label" for="room-join-name">Your Name</label>
+        <input id="room-join-name" class="field-input" type="text" maxlength="16" placeholder="Enter your name" autocomplete="off">
+        <label class="field-label" for="room-join-code">Room Code</label>
+        <input id="room-join-code" class="field-input field-input-code" type="text" maxlength="5" placeholder="ABCDE" autocomplete="off">
+        <p id="room-join-error" class="field-error" hidden></p>
+        <button id="btn-room-join-submit" class="menu-btn menu-btn-primary" type="button">
+          <span class="menu-btn-label">Join Room</span>
+        </button>
+      </div>
+
+      <div id="room-join-connecting-view" class="room-view" hidden>
+        <p class="room-status">Connecting&hellip;</p>
+      </div>
+    </div>
+  </section>
+
+  <section id="screen-customize" class="screen" data-screen="customize">
+    <div class="customize-panel">
+      <button class="link-back" id="btn-customize-back" type="button">&larr; Back</button>
+      <h2 class="room-title">Customize Your Stickman</h2>
+
+      <div id="customize-preview" class="customize-preview"></div>
+
+      <div class="customize-row">
+        <button id="btn-hair-prev" class="icon-btn" type="button" aria-label="Previous hair">
+          <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 6l-6 6 6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+        <div class="customize-field">
+          <span class="field-label">Hair</span>
+          <span id="customize-hair-label" class="customize-value">Bald</span>
+        </div>
+        <button id="btn-hair-next" class="icon-btn" type="button" aria-label="Next hair">
+          <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+      </div>
+
+      <div class="customize-row">
+        <button id="btn-face-prev" class="icon-btn" type="button" aria-label="Previous face">
+          <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 6l-6 6 6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+        <div class="customize-field">
+          <span class="field-label">Face</span>
+          <span id="customize-face-label" class="customize-value">Happy</span>
+        </div>
+        <button id="btn-face-next" class="icon-btn" type="button" aria-label="Next face">
+          <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+      </div>
+
+      <button id="btn-customize-random" class="menu-btn menu-btn-secondary" type="button">
+        <span class="menu-btn-label">Random</span>
+      </button>
+      <button id="btn-customize-done" class="menu-btn menu-btn-primary" type="button">
+        <span class="menu-btn-label">Done</span>
+      </button>
+    </div>
+  </section>
+
+  <section id="screen-lobby" class="screen" data-screen="lobby">
+    <div class="lobby-panel">
+      <div class="lobby-header">
+        <div>
+          <span class="field-label">Room Code</span>
+          <div id="lobby-code" class="room-code-text lobby-code">------</div>
+        </div>
+        <button id="btn-lobby-leave" class="link-back lobby-leave-link" type="button">Leave</button>
+      </div>
+
+      <ul id="lobby-player-list" class="lobby-player-list"></ul>
+
+      <button id="btn-lobby-ready" class="menu-btn menu-btn-primary" type="button">
+        <span class="menu-btn-label">Ready</span>
+      </button>
+
+      <div id="lobby-host-controls" class="lobby-controls" hidden>
+        <p id="lobby-start-hint" class="room-status">Waiting for all 4 players to be ready&hellip;</p>
+        <button id="btn-lobby-start" class="menu-btn menu-btn-primary" type="button" disabled>
+          <span class="menu-btn-label">Start Match</span>
+        </button>
+      </div>
+
+      <div id="lobby-guest-controls" class="lobby-controls" hidden>
+        <p class="room-status">Waiting for host to start&hellip;</p>
+      </div>
+    </div>
+  </section>
+
+  <section id="screen-match" class="screen" data-screen="match">
+    <div class="match-topbar">
+      <div class="match-topbar-brand">
+        <span class="match-logo">POLITIK<span class="logo-accent">'ISH</span></span>
+      </div>
+      <div class="match-topbar-center">
+        <h2 id="match-round-label">ROUND 1 / 10</h2>
+      </div>
+      <div class="match-topbar-right"></div>
+    </div>
+
+    <div class="match-body">
+      <aside class="match-players" id="match-player-list"></aside>
+
+      <div class="match-hierarchy">
+        <div class="hierarchy-tier" data-rank="president">
+          <div class="hierarchy-seats" id="seats-president"></div>
+          <div class="hierarchy-tier-label tier-president">PRESIDEN <span class="tier-count" id="count-president">0 / 1</span></div>
+        </div>
+        <div class="hierarchy-tier" data-rank="deputy">
+          <div class="hierarchy-seats" id="seats-deputy"></div>
+          <div class="hierarchy-tier-label tier-deputy">TIMBALAN PRESIDEN <span class="tier-count" id="count-deputy">0 / 2</span></div>
+        </div>
+        <div class="hierarchy-tier" data-rank="ketua">
+          <div class="hierarchy-seats" id="seats-ketua"></div>
+          <div class="hierarchy-tier-label tier-ketua">KETUA ADUN <span class="tier-count" id="count-ketua">0 / 3</span></div>
+        </div>
+        <div class="hierarchy-tier" data-rank="ahli">
+          <div class="hierarchy-seats" id="seats-ahli"></div>
+          <div class="hierarchy-tier-label tier-ahli">AHLI BIASA <span class="tier-count" id="count-ahli">0 / 4</span></div>
+        </div>
+      </div>
+
+      <aside class="match-actions">
+        <div class="match-actions-header">
+          <h3>PILIH 1 TINDAKAN</h3>
+          <p>Giliran: <span id="match-turn-name">-</span></p>
+        </div>
+        <div class="action-grid">
+          <button class="action-card action-projek" id="btn-action-projek" type="button">
+            <span class="action-name">Projek</span>
+            <span class="action-desc">Dapatkan duit dan influence, tapi risiko skandal naik.</span>
+          </button>
+          <button class="action-card action-politik" id="btn-action-politik" type="button">
+            <span class="action-name">Politik</span>
+            <span class="action-desc">Guna influence untuk naik pangkat. Boleh berjaya atau gagal.</span>
+          </button>
+          <button class="action-card action-sabotaj" id="btn-action-sabotaj" type="button">
+            <span class="action-name">Sabotaj</span>
+            <span class="action-desc">Serang pemain lain untuk jatuhkan mereka.</span>
+          </button>
+          <button class="action-card action-media" id="btn-action-media" type="button">
+            <span class="action-name">Kempen Imej</span>
+            <span class="action-desc">Bayar media untuk kurangkan skandal anda.</span>
+          </button>
+        </div>
+
+        <div class="scandal-meter">
+          <div class="scandal-meter-header">
+            <h4>METER SKANDAL</h4>
+            <span id="match-scandal-pct">0%</span>
+          </div>
+          <div class="scandal-bar"><div class="scandal-bar-fill" id="scandal-bar-fill"></div></div>
+          <div class="scandal-zones">
+            <span>Bersih<br>0%</span>
+            <span>Diperhati<br>30%</span>
+            <span>Disiasat<br>60%</span>
+            <span>Ditahan<br>100%</span>
+          </div>
+        </div>
+
+        <p class="scandal-warning">Jika skandal capai 100%: Hilang 50% duit, turun 1 pangkat, skandal reset ke 30%.</p>
+      </aside>
+    </div>
+
+    <div class="match-bottom-bar">
+      <div class="bottom-stat"><span class="bottom-stat-value" id="bottom-money">RM0</span><span class="bottom-stat-label">DUIT</span></div>
+      <div class="bottom-stat"><span class="bottom-stat-value" id="bottom-influence">0</span><span class="bottom-stat-label">INFLUENCE</span></div>
+      <div class="bottom-stat"><span class="bottom-stat-value" id="bottom-scandal">0%</span><span class="bottom-stat-label">SKANDAL</span></div>
+      <div class="bottom-stat"><span class="bottom-stat-value" id="bottom-rank">Ahli Biasa</span><span class="bottom-stat-label">PANGKAT SEMASA</span></div>
+    </div>
+  </section>
+
+  <section id="screen-match-end" class="screen" data-screen="match-end">
+    <div class="match-end-panel">
+      <h2 class="match-end-title">MATCH OVER</h2>
+      <div id="match-end-winner" class="match-end-winner"></div>
+      <ul id="match-end-standings" class="lobby-player-list"></ul>
+      <button id="btn-match-end-menu" class="menu-btn menu-btn-primary" type="button">
+        <span class="menu-btn-label">Back to Main Menu</span>
+      </button>
+    </div>
+  </section>
+
+  <div id="action-picker-modal" class="modal-overlay" hidden>
+    <div class="modal-card picker-card" role="dialog" aria-modal="true">
+      <div class="modal-header">
+        <h2 id="picker-title">Pilih Projek</h2>
+        <button id="btn-picker-cancel" class="icon-btn icon-btn-small" type="button" aria-label="Cancel">
+          <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+        </button>
+      </div>
+      <div id="picker-cards" class="picker-cards"></div>
+    </div>
+  </div>
+
+  <div id="target-picker-modal" class="modal-overlay" hidden>
+    <div class="modal-card" role="dialog" aria-modal="true">
+      <div class="modal-header">
+        <h2 id="target-picker-title">Pilih Sasaran</h2>
+        <button id="btn-target-picker-cancel" class="icon-btn icon-btn-small" type="button" aria-label="Cancel">
+          <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+        </button>
+      </div>
+      <div id="target-picker-list" class="target-picker-list"></div>
+    </div>
+  </div>
+
+  <div id="attempt-modal" class="modal-overlay" hidden>
+    <div class="modal-card" role="dialog" aria-modal="true">
+      <div class="modal-header">
+        <h2 id="attempt-title">Politik</h2>
+        <button id="btn-attempt-cancel-x" class="icon-btn icon-btn-small" type="button" aria-label="Cancel">
+          <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+        </button>
+      </div>
+      <div class="modal-body">
+        <p id="attempt-target-line" class="room-status" hidden></p>
+        <div class="setting-row">
+          <label for="attempt-extra-slider">Extra Influence</label>
+          <span id="attempt-extra-value">+0</span>
+        </div>
+        <input id="attempt-extra-slider" type="range" min="0" max="0" step="50" value="0">
+        <div class="attempt-stats">
+          <div><span class="field-label">Cost</span><span id="attempt-cost" class="customize-value">0</span></div>
+          <div><span class="field-label">Chance</span><span id="attempt-chance" class="customize-value">0%</span></div>
+        </div>
+        <p id="attempt-error" class="field-error" hidden></p>
+        <button id="btn-attempt-confirm" class="menu-btn menu-btn-primary" type="button">
+          <span class="menu-btn-label">Confirm</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <div id="settings-modal" class="modal-overlay" hidden>
+    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+      <div class="modal-header">
+        <h2 id="settings-title">Settings</h2>
+        <button id="btn-close-settings" class="icon-btn icon-btn-small" type="button" aria-label="Close settings">
+          <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+        </button>
+      </div>
+      <div class="modal-body">
+        <div class="setting-row">
+          <label for="setting-sound-toggle">Sound Effects</label>
+          <button id="setting-sound-toggle" class="switch" type="button" role="switch" aria-checked="true">
+            <span class="switch-knob"></span>
+          </button>
+        </div>
+        <div class="setting-row">
+          <label for="setting-volume">Volume</label>
+          <input id="setting-volume" type="range" min="0" max="100" value="70">
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+<script src="vendor/peerjs.min.js"></script>
+<script type="module" src="game.js"></script>
+</body>
+</html>
