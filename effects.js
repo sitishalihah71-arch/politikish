@@ -1,12 +1,14 @@
-// Shared resolution helpers for scandal, Media Shield, and seat capacity.
+// Shared resolution helpers for scandal, Public Support, and seat capacity.
 // Pure state mutations - no networking, no DOM.
 
 import { clamp } from './utils.js';
 import { RANKS, SEAT_CAPACITY } from './player.js';
+import { GAME_BALANCE } from './balance.js';
 
-export const SCANDAL_PENALTY_THRESHOLD = 100;
-export const SCANDAL_PENALTY_RESET = 30;
-export const MEDIA_SHIELD_REDUCTION = 0.5;
+export const SCANDAL_PENALTY_THRESHOLD = GAME_BALANCE.scandal.penaltyThreshold;
+export const SCANDAL_PENALTY_RESET = GAME_BALANCE.scandal.resetTo;
+export const SCANDAL_MONEY_LOSS_PERCENT = GAME_BALANCE.scandal.moneyLossPercent;
+export const PUBLIC_SUPPORT_SCANDAL_REDUCTION = GAME_BALANCE.publicSupport.scandalReduction / 100;
 
 export function getScandalStatus(scandal) {
   if (scandal >= 100) return 'Ditahan';
@@ -15,24 +17,21 @@ export function getScandalStatus(scandal) {
   return 'Bersih';
 }
 
-// Positive delta = incoming scandal (reduced by an active Media Shield).
-// Negative delta = a reduction, applied directly with no shield interaction.
+// Positive delta = incoming scandal (reduced by active Public Support).
+// Negative delta = a reduction, applied directly with no interaction.
 export function applyScandalDelta(player, delta) {
   let applied = delta;
-  if (delta > 0 && player.mediaShieldTurns > 0) {
-    applied = Math.round(delta * MEDIA_SHIELD_REDUCTION);
+  if (delta > 0 && player.publicSupportTurns > 0) {
+    applied = Math.round(delta * (1 - PUBLIC_SUPPORT_SCANDAL_REDUCTION));
   }
   player.scandal = clamp(player.scandal + applied, 0, 100);
   return applied;
 }
 
-// Ticks down every player's Media Shield once per turn taken at the table
-// (not just the shield-holder's own turns) - the shield exists to protect
-// against Sabotaj/Alih Perhatian between a player's own turns.
-export function tickMediaShields(players) {
-  players.forEach((p) => {
-    if (p.mediaShieldTurns > 0) p.mediaShieldTurns -= 1;
-  });
+// Public Support only ticks down at the end of its owner's own turn, not on
+// every turn taken at the table - callers pass just that one player.
+export function tickPublicSupport(player) {
+  if (player && player.publicSupportTurns > 0) player.publicSupportTurns -= 1;
 }
 
 // Returns true if a rank was actually lost. If the player is already at the
@@ -43,7 +42,7 @@ export function tickMediaShields(players) {
 export function applyScandalPenalty(player, players) {
   if (player.scandal < SCANDAL_PENALTY_THRESHOLD) return false;
 
-  player.money = Math.floor(player.money / 2);
+  player.money = Math.floor(player.money * (1 - SCANDAL_MONEY_LOSS_PERCENT / 100));
   player.scandal = SCANDAL_PENALTY_RESET;
 
   const index = RANKS.indexOf(player.rank);

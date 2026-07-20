@@ -44,7 +44,7 @@ export function initMatchState(player) {
   player.influence = STARTING_INFLUENCE;
   player.scandal = STARTING_SCANDAL;
   player.rank = 'ahli';
-  player.mediaShieldTurns = 0;
+  player.publicSupportTurns = 0;
 }
 
 export function getNextRank(rank) {

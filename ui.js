@@ -10,6 +10,7 @@ import { RANKS, RANK_LABELS, SEAT_CAPACITY, getNextRank } from './player.js';
 import { hasOpenSeat } from './effects.js';
 import * as politics from './politics.js';
 import * as sabotage from './sabotage.js';
+import { GAME_BALANCE } from './balance.js';
 
 let settings = loadSettings();
 let toastTimer = null;
@@ -388,6 +389,7 @@ function renderMatchPlayerList(snapshot) {
       const name = document.createElement('div');
       name.className = 'player-card-name';
       name.textContent = player.name;
+      appendPublicSupportBadge(name, player);
       info.appendChild(name);
 
       const stats = document.createElement('div');
@@ -443,6 +445,9 @@ function renderHierarchy(snapshot) {
 
       wrap.appendChild(seat);
       wrap.appendChild(nameLabel);
+      // Anchored to `wrap` (not the overflow-hidden avatar box) so the badge
+      // never gets clipped by the seat's `overflow: hidden`.
+      if (player) appendPublicSupportBadge(wrap, player, 'hierarchy-shield-badge');
       container.appendChild(wrap);
     }
 
@@ -469,7 +474,9 @@ function renderActionPanel(snapshot) {
   const localPlayer = findLocalPlayer(snapshot);
   const isMyTurn = snapshot.activePlayerId === snapshot.localPlayerId;
   const activePlayer = snapshot.players.find((p) => p.id === snapshot.activePlayerId);
-  $('#match-turn-name').textContent = activePlayer ? activePlayer.name : '-';
+  const turnNameEl = $('#match-turn-name');
+  turnNameEl.textContent = activePlayer ? activePlayer.name : '-';
+  if (activePlayer) appendPublicSupportBadge(turnNameEl, activePlayer);
 
   const isPresident = localPlayer && localPlayer.rank === 'president';
 
@@ -504,13 +511,25 @@ const MONEY_ICON = '💰';
 const INFLUENCE_ICON = '⭐';
 const SCANDAL_ICON = '⚠️';
 const SHIELD_ICON = '🛡️';
+const PUBLIC_SUPPORT_TOOLTIP = `Public Support - Incoming Scandal reduced by ${GAME_BALANCE.publicSupport.scandalReduction}%. Enemy Sabotaj success chance reduced by ${GAME_BALANCE.sabotage.publicSupportPenalty}%.`;
+
+// Appends a "🛡️N" badge after a player's name wherever it's displayed, so
+// Public Support is visible at a glance in every player-name spot in the UI.
+function appendPublicSupportBadge(container, player, extraClass) {
+  if (!(player.publicSupportTurns > 0)) return;
+  const badge = document.createElement('span');
+  badge.className = extraClass ? `public-support-badge ${extraClass}` : 'public-support-badge';
+  badge.textContent = `${SHIELD_ICON}${player.publicSupportTurns}`;
+  badge.title = PUBLIC_SUPPORT_TOOLTIP;
+  container.appendChild(badge);
+}
 
 function describeMediaCardLine(card) {
   const lines = [];
   if (card.kind === 'direct') {
     if (card.scandalDelta) lines.push(makeCardLine(`${SCANDAL_ICON} ${card.scandalDelta}% Scandal`, card.scandalDelta < 0));
     if (card.influenceDelta) lines.push(makeCardLine(`${INFLUENCE_ICON} +${card.influenceDelta} Influence`, true));
-    if (card.shieldTurns) lines.push(makeCardLine(`${SHIELD_ICON} Media Shield ${card.shieldTurns} Turns`, true));
+    if (card.supportTurns) lines.push(makeCardLine(`${SHIELD_ICON} Public Support ${card.supportTurns} Turns`, true));
   } else if (card.kind === 'target') {
     lines.push(makeCardLine(`${SCANDAL_ICON} You: ${card.selfScandalDelta}% Scandal`, true));
     lines.push(makeCardLine(`${SCANDAL_ICON} Target: +${card.targetScandalDelta}% Scandal`, false));
@@ -590,6 +609,7 @@ function openTargetPicker(context) {
 
     const name = document.createElement('span');
     name.textContent = player.name;
+    appendPublicSupportBadge(name, player);
     btn.appendChild(name);
 
     btn.addEventListener('click', () => {
@@ -608,16 +628,47 @@ function openTargetPicker(context) {
   $('#target-picker-modal').hidden = false;
 }
 
-function updateAttemptPreview(kind, fromRank, localPlayer, extra) {
+function makeBreakdownRow(label, value, cls) {
+  const row = document.createElement('div');
+  row.className = `attempt-breakdown-row${cls ? ` ${cls}` : ''}`;
+  const labelEl = document.createElement('span');
+  labelEl.textContent = label;
+  const valueEl = document.createElement('span');
+  valueEl.textContent = value;
+  row.appendChild(labelEl);
+  row.appendChild(valueEl);
+  return row;
+}
+
+function renderSabotajBreakdown(fromRank, extra, targetHasPublicSupport) {
+  const breakdown = sabotage.describeSabotajChance(fromRank, extra, targetHasPublicSupport);
+  const el = $('#attempt-breakdown');
+  el.innerHTML = '';
+  el.appendChild(makeBreakdownRow('Base Chance', `${Math.round(breakdown.base * 100)}%`));
+  el.appendChild(makeBreakdownRow('Extra Influence', `+${Math.round(breakdown.extraBonus * 100)}%`, 'is-positive'));
+  if (targetHasPublicSupport) {
+    el.appendChild(makeBreakdownRow(`${SHIELD_ICON} Public Support`, `-${Math.round(breakdown.publicSupportPenalty * 100)}%`, 'is-negative'));
+  }
+  el.appendChild(makeBreakdownRow('Final Chance', `${Math.round(breakdown.final * 100)}%`, 'is-final'));
+  el.hidden = false;
+}
+
+function updateAttemptPreview(kind, fromRank, localPlayer, extra, targetHasPublicSupport) {
   const table = kind === 'politik' ? politics : sabotage;
   const cost = kind === 'politik' ? table.getPolitikCost(fromRank, extra) : table.getSabotajCost(fromRank, extra);
   const chance = kind === 'politik'
     ? table.calculatePolitikChance(fromRank, extra)
-    : table.calculateSabotajChance(fromRank, extra);
+    : table.calculateSabotajChance(fromRank, extra, targetHasPublicSupport);
 
   $('#attempt-extra-value').textContent = `+${extra}`;
   $('#attempt-cost').textContent = String(cost);
   $('#attempt-chance').textContent = `${Math.round(chance * 100)}%`;
+
+  if (kind === 'sabotaj') {
+    renderSabotajBreakdown(fromRank, extra, targetHasPublicSupport);
+  } else {
+    $('#attempt-breakdown').hidden = true;
+  }
 
   const affordable = localPlayer.influence >= cost;
   $('#btn-attempt-confirm').disabled = !affordable;
@@ -630,13 +681,17 @@ function openAttemptModal(kind, targetId) {
   const snapshot = match.getMatchSnapshot();
   const localPlayer = findLocalPlayer(snapshot);
   const fromRank = localPlayer.rank;
+  const target = kind === 'sabotaj' ? snapshot.players.find((p) => p.id === targetId) : null;
+  const targetHasPublicSupport = Boolean(target && target.publicSupportTurns > 0);
 
   $('#attempt-title').textContent = kind === 'politik' ? 'Politik' : 'Sabotaj';
+  $('#btn-attempt-confirm .menu-btn-label').textContent = kind === 'sabotaj' ? 'Attack' : 'Confirm';
 
   const targetLine = $('#attempt-target-line');
   if (kind === 'sabotaj') {
-    const target = snapshot.players.find((p) => p.id === targetId);
-    targetLine.textContent = `Target: ${target ? target.name : ''}`;
+    targetLine.textContent = '';
+    targetLine.appendChild(document.createTextNode(`Target: ${target ? target.name : ''}`));
+    if (target) appendPublicSupportBadge(targetLine, target);
     targetLine.hidden = false;
   } else {
     targetLine.hidden = true;
@@ -659,9 +714,9 @@ function openAttemptModal(kind, targetId) {
   slider.max = String(maxExtra);
   slider.step = String(step);
   slider.value = '0';
-  slider.oninput = () => updateAttemptPreview(kind, fromRank, localPlayer, Number(slider.value));
+  slider.oninput = () => updateAttemptPreview(kind, fromRank, localPlayer, Number(slider.value), targetHasPublicSupport);
 
-  updateAttemptPreview(kind, fromRank, localPlayer, 0);
+  updateAttemptPreview(kind, fromRank, localPlayer, 0, targetHasPublicSupport);
   $('#attempt-modal').hidden = false;
 }
 

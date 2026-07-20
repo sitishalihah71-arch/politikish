@@ -15,7 +15,7 @@ import { bus } from './utils.js';
 import * as room from './room.js';
 import * as multiplayer from './multiplayer.js';
 import { RANKS, initMatchState } from './player.js';
-import { applyScandalPenalty, tickMediaShields } from './effects.js';
+import { applyScandalPenalty, tickPublicSupport } from './effects.js';
 import { generateProjectOffers, resolveProjek } from './projects.js';
 import { generateMediaOffers, resolveMedia } from './media.js';
 import { resolvePolitik } from './politics.js';
@@ -105,9 +105,16 @@ function endMatch(players) {
 // starting a match with fewer than 4 people, and a player being permanently
 // removed (reconnect grace period expiring) mid-match, which can leave a gap
 // in the slot numbers.
-function advanceTurn() {
+//
+// Public Support only decays at the end of its own owner's turn (not on
+// every turn taken at the table), so only the player whose turn is ending
+// here gets ticked - never the whole roster. `skipSupportTick` covers the
+// one exception: the turn a Media card just granted/refreshed the shield,
+// which must not immediately eat into the duration it just set.
+function advanceTurn({ skipSupportTick = false } = {}) {
   const players = room.getPlayersLive();
-  tickMediaShields(players);
+  const endingPlayer = players.find((p) => p.slot === turnSlot);
+  if (endingPlayer && !skipSupportTick) tickPublicSupport(endingPlayer);
   lastPenalized = players.filter((p) => applyScandalPenalty(p, players)).map((p) => p.id);
 
   const activeSlots = players.map((p) => p.slot).sort((a, b) => a - b);
@@ -178,7 +185,7 @@ function hostResolveMedia(playerId, cardId, targetId) {
   const result = resolveMedia(player, cardId, target);
   if (!result.ok) return;
   setLastAction({ type: 'media', actorId: playerId, targetId: target?.id, success: result.success, card: result.card });
-  advanceTurn();
+  advanceTurn({ skipSupportTick: Boolean(result.card.supportTurns) });
 }
 
 function hostResolvePolitik(playerId, extraInfluence, respond) {

@@ -3,16 +3,19 @@
 
 import { getNextRank } from './player.js';
 import { applyScandalDelta, hasOpenSeat } from './effects.js';
+import { GAME_BALANCE } from './balance.js';
+
+const { politics: cfg } = GAME_BALANCE;
 
 export const PROMOTION_TABLE = {
-  ahli: { baseCost: 100, baseChance: 0.8 },
-  ketua: { baseCost: 200, baseChance: 0.65 },
-  deputy: { baseCost: 350, baseChance: 0.5 },
+  ahli: { baseCost: cfg.ahli.cost, baseChance: cfg.ahli.chance / 100 },
+  ketua: { baseCost: cfg.ketua.cost, baseChance: cfg.ketua.chance / 100 },
+  deputy: { baseCost: cfg.deputy.cost, baseChance: cfg.deputy.chance / 100 },
 };
 
-export const PROMOTION_EXTRA_STEP = 50;
-export const PROMOTION_EXTRA_BONUS = 0.1;
-export const PROMOTION_MAX_CHANCE = 0.95;
+export const PROMOTION_EXTRA_STEP = cfg.extraInfluenceStep;
+export const PROMOTION_EXTRA_BONUS = cfg.extraInfluenceBonus / 100;
+export const PROMOTION_MAX_CHANCE = cfg.maxChance / 100;
 
 export function calculatePolitikChance(fromRank, extraInfluence) {
   const config = PROMOTION_TABLE[fromRank];

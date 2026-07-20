@@ -6,12 +6,12 @@ import { pickRandomUnique } from './utils.js';
 import { applyScandalDelta } from './effects.js';
 
 export const MEDIA_CARDS = [
-  { id: 'sidang-media', name: 'Sidang Media', kind: 'direct', cost: 15000, scandalDelta: -10, shieldTurns: 2 },
+  { id: 'sidang-media', name: 'Sidang Media', kind: 'direct', cost: 15000, scandalDelta: -10, supportTurns: 2 },
   { id: 'alih-perhatian', name: 'Alih Perhatian', kind: 'target', cost: 20000, selfScandalDelta: -10, targetScandalDelta: 10 },
   { id: 'kempen-digital', name: 'Kempen Digital', kind: 'direct', cost: 10000, scandalDelta: -20 },
   { id: 'program-rakyat', name: 'Program Rakyat', kind: 'direct', cost: 20000, scandalDelta: -10, influenceDelta: 100 },
   { id: 'temu-bual', name: 'Temu Bual Eksklusif', kind: 'chance', cost: 30000, chance: 0.5, successScandalDelta: -40, failScandalDelta: 20 },
-  { id: 'iklan-tv', name: 'Iklan TV', kind: 'direct', cost: 35000, shieldTurns: 3 },
+  { id: 'iklan-tv', name: 'Iklan TV', kind: 'direct', cost: 35000, supportTurns: 3 },
 ];
 
 export function generateMediaOffers() {
@@ -44,7 +44,7 @@ export function resolveMedia(player, cardId, targetPlayer, rng = Math.random) {
   if (card.kind === 'direct') {
     if (card.scandalDelta) applyScandalDelta(player, card.scandalDelta);
     if (card.influenceDelta) player.influence += card.influenceDelta;
-    if (card.shieldTurns) player.mediaShieldTurns = card.shieldTurns;
+    if (card.supportTurns) player.publicSupportTurns = card.supportTurns;
   } else if (card.kind === 'target') {
     applyScandalDelta(player, card.selfScandalDelta);
     applyScandalDelta(targetPlayer, card.targetScandalDelta);
