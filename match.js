@@ -14,7 +14,7 @@
 import { bus } from './utils.js';
 import * as room from './room.js';
 import * as multiplayer from './multiplayer.js';
-import { RANKS, MAX_PLAYERS, initMatchState } from './player.js';
+import { RANKS, initMatchState } from './player.js';
 import { applyScandalPenalty, tickMediaShields } from './effects.js';
 import { generateProjectOffers, resolveProjek } from './projects.js';
 import { generateMediaOffers, resolveMedia } from './media.js';
@@ -100,38 +100,48 @@ function endMatch(players) {
   broadcastMatchUpdate();
 }
 
-function computeNextSlotAndRound(slot, roundNum) {
-  if (slot === MAX_PLAYERS) return { slot: 1, round: roundNum + 1 };
-  return { slot: slot + 1, round: roundNum };
-}
-
-// Called after every resolved action (and after a disconnect forces a skip).
-// Ticks shields, checks the 100% scandal penalty for everyone, then advances
-// to the next connected player - or ends the match if round 10 just finished.
+// Turn order cycles through whichever slots are actually present, sorted
+// ascending - not a hardcoded 1..4 range. This has to hold up in two cases:
+// starting a match with fewer than 4 people, and a player being permanently
+// removed (reconnect grace period expiring) mid-match, which can leave a gap
+// in the slot numbers.
 function advanceTurn() {
   const players = room.getPlayersLive();
   tickMediaShields(players);
   lastPenalized = players.filter((p) => applyScandalPenalty(p, players)).map((p) => p.id);
 
-  let { slot, round } = computeNextSlotAndRound(turnSlot, currentRound);
+  const activeSlots = players.map((p) => p.slot).sort((a, b) => a - b);
+  if (activeSlots.length === 0) return;
+
+  const currentIndex = activeSlots.indexOf(turnSlot);
+  let nextIndex = currentIndex === -1 ? 0 : currentIndex + 1;
+  let round = currentRound;
+  if (nextIndex >= activeSlots.length) {
+    nextIndex = 0;
+    round += 1;
+  }
   if (round > MAX_ROUNDS) {
     endMatch(players);
     return;
   }
 
   let guard = 0;
-  while (guard < MAX_PLAYERS) {
-    const candidate = players.find((p) => p.slot === slot);
+  while (guard < activeSlots.length) {
+    const candidate = players.find((p) => p.slot === activeSlots[nextIndex]);
     if (candidate && candidate.connected) break;
-    ({ slot, round } = computeNextSlotAndRound(slot, round));
-    if (round > MAX_ROUNDS) {
-      endMatch(players);
-      return;
+    nextIndex += 1;
+    if (nextIndex >= activeSlots.length) {
+      nextIndex = 0;
+      round += 1;
+      if (round > MAX_ROUNDS) {
+        endMatch(players);
+        return;
+      }
     }
     guard += 1;
   }
 
-  turnSlot = slot;
+  turnSlot = activeSlots[nextIndex];
   currentRound = round;
   broadcastMatchUpdate();
 }
@@ -320,6 +330,18 @@ export function attemptSabotaj(targetId, extraInfluence) {
   }
 }
 
+// Host-only manual override: forces the current player's turn to end with
+// no resolution (no cost, no resource change) - for a player who's still
+// connected but has stepped away, which the automatic disconnect-skip in
+// advanceTurn() can't detect on its own.
+export function skipCurrentPlayer() {
+  if (!isHostRole() || !matchStarted || matchOver) return;
+  const active = getActivePlayer(room.getPlayersLive());
+  if (!active) return;
+  setLastAction({ type: 'skip', actorId: active.id });
+  advanceTurn();
+}
+
 // ---------- Match start / lifecycle ----------
 
 bus.on('room:match-started', () => {
@@ -331,7 +353,8 @@ bus.on('room:match-started', () => {
     const players = room.getPlayersLive();
     players.forEach(initMatchState);
     currentRound = 1;
-    turnSlot = (players.find((p) => p.connected) || players[0]).slot;
+    const bySlot = [...players].sort((a, b) => a.slot - b.slot);
+    turnSlot = (bySlot.find((p) => p.connected) || bySlot[0]).slot;
     multiplayer.onMessage(handleHostMatchMessage);
     broadcastMatchUpdate();
   } else {

@@ -290,9 +290,9 @@ function renderLobby(snapshot) {
     const startBtn = $('#btn-lobby-start');
     startBtn.disabled = !canStart;
     $('#lobby-start-hint').textContent = canStart
-      ? 'Everyone is ready!'
-      : snapshot.players.length < 4
-        ? `Waiting for more players (${snapshot.players.length}/4)…`
+      ? 'Ready to start!'
+      : snapshot.players.length < room.MIN_PLAYERS_TO_START
+        ? `Need at least ${room.MIN_PLAYERS_TO_START} players (${snapshot.players.length}/${room.MIN_PLAYERS_TO_START})…`
         : 'Waiting for all players to be ready…';
   }
 }
@@ -477,6 +477,12 @@ function renderActionPanel(snapshot) {
   $('#btn-action-politik').disabled = !isMyTurn || isPresident;
   $('#btn-action-sabotaj').disabled = !isMyTurn || isPresident;
   $('#btn-action-media').disabled = !isMyTurn;
+
+  const skipBtn = $('#btn-host-skip');
+  skipBtn.hidden = !snapshot.isHost;
+  if (snapshot.isHost) {
+    skipBtn.textContent = activePlayer ? `Skip ${activePlayer.name}'s Turn` : 'Skip Turn';
+  }
 
   if (localPlayer) {
     const pct = localPlayer.scandal;
@@ -688,6 +694,9 @@ function handleActionFeedback(snapshot) {
       ? `${actorName} sabotaged ${targetName} and took their seat!`
       : `${actorName}'s Sabotaj on ${targetName} failed.`;
     if (action.success) sound.playPromotion(); else sound.playFailure();
+  } else if (action.type === 'skip') {
+    message = `Host skipped ${actorName}'s turn.`;
+    sound.playWarning();
   }
 
   if (message) showToast(message, 4000);
@@ -788,6 +797,11 @@ function renderMatchScreen(snapshot) {
 }
 
 function wireMatchActions() {
+  $('#btn-host-skip').addEventListener('click', () => {
+    sound.playClick();
+    match.skipCurrentPlayer();
+  });
+
   $('#btn-action-projek').addEventListener('click', () => {
     sound.playClick();
     match.requestProjekOffers();

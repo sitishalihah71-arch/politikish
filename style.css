@@ -924,6 +924,27 @@ button {
   color: var(--gold);
 }
 
+.host-skip-btn {
+  margin-top: 8px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-card);
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+}
+
+.host-skip-btn:hover {
+  border-color: var(--red);
+  color: var(--red);
+}
+
+.host-skip-btn[hidden] {
+  display: none;
+}
+
 .action-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;

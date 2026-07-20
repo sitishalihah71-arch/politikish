@@ -40,7 +40,7 @@
       </div>
     </div>
 
-    <p class="menu-footer">4 Players &middot; 10 Rounds &middot; One President</p>
+    <p class="menu-footer">2&ndash;4 Players &middot; 10 Rounds &middot; One President</p>
   </section>
 
   <section id="screen-room-host" class="screen" data-screen="room-host">
@@ -140,7 +140,7 @@
       </button>
 
       <div id="lobby-host-controls" class="lobby-controls" hidden>
-        <p id="lobby-start-hint" class="room-status">Waiting for all 4 players to be ready&hellip;</p>
+        <p id="lobby-start-hint" class="room-status">Waiting for all players to be ready&hellip;</p>
         <button id="btn-lobby-start" class="menu-btn menu-btn-primary" type="button" disabled>
           <span class="menu-btn-label">Start Match</span>
         </button>
@@ -189,6 +189,7 @@
         <div class="match-actions-header">
           <h3>PILIH 1 TINDAKAN</h3>
           <p>Giliran: <span id="match-turn-name">-</span></p>
+          <button id="btn-host-skip" class="host-skip-btn" type="button" hidden>Skip Turn</button>
         </div>
         <div class="action-grid">
           <button class="action-card action-projek" id="btn-action-projek" type="button">

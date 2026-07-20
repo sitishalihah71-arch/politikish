@@ -11,6 +11,10 @@ const RECONNECT_GRACE_MS = 120000;
 const CREATE_ROOM_MAX_ATTEMPTS = 5;
 const MAX_NAME_LENGTH = 16;
 
+// A match needs at least two players to be a contest at all - the upper
+// bound (MAX_PLAYERS) is still enforced separately when players join.
+export const MIN_PLAYERS_TO_START = 2;
+
 let role = null; // 'host' | 'client' | null
 let roomCode = null;
 let localPlayerId = null;
@@ -258,7 +262,7 @@ export function setLocalReady(ready) {
 }
 
 export function canStartMatch() {
-  return players.length === MAX_PLAYERS && players.every((p) => p.connected && p.ready);
+  return players.length >= MIN_PLAYERS_TO_START && players.every((p) => p.connected && p.ready);
 }
 
 export function startMatch() {
