@@ -40,7 +40,7 @@
       </div>
     </div>
 
-    <p class="menu-footer">2&ndash;4 Players &middot; 10 Rounds &middot; One President</p>
+    <p class="menu-footer">2&ndash;6 Players &middot; Configurable Rounds &middot; One President</p>
   </section>
 
   <section id="screen-room-host" class="screen" data-screen="room-host">
@@ -133,6 +133,15 @@
         <button id="btn-lobby-leave" class="link-back lobby-leave-link" type="button">Leave</button>
       </div>
 
+      <div class="lobby-settings-summary">
+        <span class="field-label">Room Settings</span>
+        <div class="lobby-settings-summary-row">
+          <span>Players: <strong id="lobby-settings-players">4</strong></span>
+          <span>Rounds: <strong id="lobby-settings-rounds">10</strong></span>
+          <span id="lobby-settings-events-badge" class="lobby-settings-events-badge">Events: ON</span>
+        </div>
+      </div>
+
       <ul id="lobby-player-list" class="lobby-player-list"></ul>
 
       <button id="btn-lobby-ready" class="menu-btn menu-btn-primary" type="button">
@@ -140,6 +149,22 @@
       </button>
 
       <div id="lobby-host-controls" class="lobby-controls" hidden>
+        <div class="lobby-settings-edit">
+          <div class="setting-row">
+            <label for="setting-lobby-players">Players</label>
+            <select id="setting-lobby-players" class="field-select"></select>
+          </div>
+          <div class="setting-row">
+            <label for="setting-lobby-rounds">Rounds</label>
+            <select id="setting-lobby-rounds" class="field-select"></select>
+          </div>
+          <div class="setting-row">
+            <label for="setting-lobby-events">National Events</label>
+            <button id="setting-lobby-events" class="switch" type="button" role="switch" aria-checked="true">
+              <span class="switch-knob"></span>
+            </button>
+          </div>
+        </div>
         <p id="lobby-start-hint" class="room-status">Waiting for all players to be ready&hellip;</p>
         <button id="btn-lobby-start" class="menu-btn menu-btn-primary" type="button" disabled>
           <span class="menu-btn-label">Start Match</span>
@@ -267,6 +292,13 @@
           <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
         </button>
       </div>
+      <div id="kabel-banner" class="legendary-banner" hidden>
+        <div class="legendary-banner-icon">🕴️</div>
+        <div class="legendary-banner-info">
+          <div class="legendary-banner-title">KABEL <span class="legendary-tag">Legendary</span></div>
+          <p class="legendary-banner-desc">Use your political connections to challenge any occupied political seat.</p>
+        </div>
+      </div>
       <div id="target-picker-list" class="target-picker-list"></div>
     </div>
   </div>
@@ -296,6 +328,17 @@
           <span class="menu-btn-label">Confirm</span>
         </button>
       </div>
+    </div>
+  </div>
+
+  <div id="national-event-overlay" class="modal-overlay national-event-overlay" hidden>
+    <div class="modal-card national-event-card" role="dialog" aria-modal="true">
+      <div class="national-event-icon" id="national-event-icon">📈</div>
+      <h2 id="national-event-name" class="national-event-name">Economic Boom</h2>
+      <p id="national-event-description" class="national-event-description"></p>
+      <button id="btn-national-event-continue" class="menu-btn menu-btn-primary" type="button">
+        <span class="menu-btn-label">Continue</span>
+      </button>
     </div>
   </div>
 

@@ -39,6 +39,7 @@ export function resolveMedia(player, cardId, targetPlayer, rng = Math.random) {
 
   const { card } = validation;
   player.money -= card.cost;
+  player.stats.mediaCardsUsed += 1;
 
   let success = true;
   if (card.kind === 'direct') {

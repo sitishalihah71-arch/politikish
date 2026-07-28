@@ -6,7 +6,7 @@ import * as room from './room.js';
 import { HAIR_STYLES, FACE_STYLES, renderAvatarSVG } from './avatar.js';
 import * as sound from './sound.js';
 import * as match from './match.js';
-import { RANKS, RANK_LABELS, SEAT_CAPACITY, getNextRank } from './player.js';
+import { RANKS, RANK_LABELS, getSeatCapacity, getNextRank } from './player.js';
 import { hasOpenSeat } from './effects.js';
 import * as politics from './politics.js';
 import * as sabotage from './sabotage.js';
@@ -36,7 +36,7 @@ export function showToast(message, duration = 3500) {
 }
 
 const JOIN_REJECT_MESSAGES = {
-  'room-full': 'That room already has 4 players.',
+  'room-full': 'That room is already full.',
   'invalid-name': 'Please enter a valid name.',
 };
 
@@ -235,6 +235,12 @@ function renderLobby(snapshot) {
 
   $('#lobby-code').textContent = snapshot.code;
 
+  $('#lobby-settings-players').textContent = String(snapshot.settings.maxPlayers);
+  $('#lobby-settings-rounds').textContent = String(snapshot.settings.rounds);
+  const eventsBadge = $('#lobby-settings-events-badge');
+  eventsBadge.textContent = `Events: ${snapshot.settings.nationalEvents ? 'ON' : 'OFF'}`;
+  eventsBadge.classList.toggle('is-on', snapshot.settings.nationalEvents);
+
   const listEl = $('#lobby-player-list');
   listEl.innerHTML = '';
   snapshot.players
@@ -287,18 +293,34 @@ function renderLobby(snapshot) {
   $('#lobby-guest-controls').hidden = snapshot.isHost;
 
   if (snapshot.isHost) {
+    $('#setting-lobby-players').value = String(snapshot.settings.maxPlayers);
+    $('#setting-lobby-rounds').value = String(snapshot.settings.rounds);
+    $('#setting-lobby-events').setAttribute('aria-checked', String(snapshot.settings.nationalEvents));
+
     const canStart = room.canStartMatch();
     const startBtn = $('#btn-lobby-start');
     startBtn.disabled = !canStart;
     $('#lobby-start-hint').textContent = canStart
       ? 'Ready to start!'
-      : snapshot.players.length < room.MIN_PLAYERS_TO_START
-        ? `Need at least ${room.MIN_PLAYERS_TO_START} players (${snapshot.players.length}/${room.MIN_PLAYERS_TO_START})…`
-        : 'Waiting for all players to be ready…';
+      : `Need ${snapshot.settings.maxPlayers} players, all ready (${snapshot.players.length}/${snapshot.settings.maxPlayers})…`;
   }
 }
 
+function populateSelect(selectEl, options, defaultValue) {
+  selectEl.innerHTML = '';
+  options.forEach((opt) => {
+    const optionEl = document.createElement('option');
+    optionEl.value = String(opt);
+    optionEl.textContent = String(opt);
+    selectEl.appendChild(optionEl);
+  });
+  selectEl.value = String(defaultValue);
+}
+
 function wireLobbyScreen() {
+  populateSelect($('#setting-lobby-players'), GAME_BALANCE.room.playerOptions, GAME_BALANCE.room.defaultPlayers);
+  populateSelect($('#setting-lobby-rounds'), GAME_BALANCE.room.roundOptions, GAME_BALANCE.room.defaultRounds);
+
   $('#btn-lobby-leave').addEventListener('click', () => {
     room.leaveRoom();
     showScreen('main-menu');
@@ -312,6 +334,19 @@ function wireLobbyScreen() {
 
   $('#btn-lobby-start').addEventListener('click', () => {
     room.startMatch();
+  });
+
+  $('#setting-lobby-players').addEventListener('change', (e) => {
+    room.updateSettings({ maxPlayers: Number(e.target.value) });
+  });
+
+  $('#setting-lobby-rounds').addEventListener('change', (e) => {
+    room.updateSettings({ rounds: Number(e.target.value) });
+  });
+
+  $('#setting-lobby-events').addEventListener('click', () => {
+    const current = $('#setting-lobby-events').getAttribute('aria-checked') === 'true';
+    room.updateSettings({ nationalEvents: !current });
   });
 }
 
@@ -351,6 +386,7 @@ const ACTION_REJECT_MESSAGES = {
 let hasEnteredMatchScreen = false;
 let hasEnteredMatchEndScreen = false;
 let lastHandledActionSeq = -1;
+let lastSeenEventSeq = -1;
 let wasMyTurn = false;
 let currentAttempt = null; // { kind: 'politik' | 'sabotaj', targetId }
 
@@ -416,11 +452,13 @@ function renderHierarchy(snapshot) {
     oldRects.set(el.dataset.playerId, el.getBoundingClientRect());
   });
 
+  const seatCapacity = getSeatCapacity(snapshot.players.length);
+
   RANKS.forEach((rank) => {
     const container = $(`#seats-${rank}`);
     container.innerHTML = '';
     const occupants = snapshot.players.filter((p) => p.rank === rank).sort((a, b) => a.slot - b.slot);
-    const capacity = SEAT_CAPACITY[rank];
+    const capacity = seatCapacity[rank];
     const slotCount = Math.max(capacity, occupants.length);
 
     for (let i = 0; i < slotCount; i++) {
@@ -589,11 +627,15 @@ function openOffersModal(action, offers) {
 function openTargetPicker(context) {
   const snapshot = match.getMatchSnapshot();
   const localPlayer = findLocalPlayer(snapshot);
+  const localRankIndex = RANKS.indexOf(localPlayer.rank);
   const candidates = context.mode === 'sabotaj'
-    ? snapshot.players.filter((p) => p.rank === context.rank && p.id !== localPlayer.id)
+    ? (context.isKabel
+        ? snapshot.players.filter((p) => p.id !== localPlayer.id && RANKS.indexOf(p.rank) > localRankIndex)
+        : snapshot.players.filter((p) => p.rank === context.rank && p.id !== localPlayer.id))
     : snapshot.players.filter((p) => p.id !== localPlayer.id && p.connected);
 
   $('#target-picker-title').textContent = context.mode === 'sabotaj' ? 'Pilih Sasaran Sabotaj' : 'Pilih Sasaran';
+  $('#kabel-banner').hidden = !context.isKabel;
   const listEl = $('#target-picker-list');
   listEl.innerHTML = '';
 
@@ -616,7 +658,7 @@ function openTargetPicker(context) {
       sound.playClick();
       $('#target-picker-modal').hidden = true;
       if (context.mode === 'sabotaj') {
-        openAttemptModal('sabotaj', player.id);
+        openAttemptModal('sabotaj', player.id, context.isKabel);
       } else {
         match.chooseMediaCard(context.cardId, player.id);
       }
@@ -640,8 +682,50 @@ function makeBreakdownRow(label, value, cls) {
   return row;
 }
 
-function renderSabotajBreakdown(fromRank, extra, targetHasPublicSupport) {
-  const breakdown = sabotage.describeSabotajChance(fromRank, extra, targetHasPublicSupport);
+// Centralizes the "which cost/chance table applies" branching so both the
+// slider setup (openAttemptModal) and the live preview (updateAttemptPreview)
+// stay in sync instead of re-deriving it separately. Kabel is just Sabotaj
+// with the target-rank-keyed KABEL_TABLE/cost instead of the attacker-rank
+// one - same math, same confirmation dialog.
+function resolveAttemptConfig(kind, fromRank, isKabel, targetRank) {
+  if (kind === 'politik') {
+    const config = politics.PROMOTION_TABLE[fromRank];
+    return {
+      baseCost: config.baseCost,
+      baseChance: config.baseChance,
+      step: politics.PROMOTION_EXTRA_STEP,
+      bonus: politics.PROMOTION_EXTRA_BONUS,
+      maxChance: politics.PROMOTION_MAX_CHANCE,
+      getCost: (extra) => politics.getPolitikCost(fromRank, extra),
+      getChance: (extra) => politics.calculatePolitikChance(fromRank, extra),
+      describe: null,
+    };
+  }
+  if (isKabel) {
+    return {
+      baseCost: sabotage.KABEL_COST,
+      baseChance: sabotage.KABEL_TABLE[targetRank].chance,
+      step: sabotage.SABOTAGE_EXTRA_STEP,
+      bonus: sabotage.SABOTAGE_EXTRA_BONUS,
+      maxChance: sabotage.SABOTAGE_MAX_CHANCE,
+      getCost: (extra) => sabotage.getKabelCost(extra),
+      getChance: (extra, support) => sabotage.calculateKabelChance(targetRank, extra, support),
+      describe: (extra, support) => sabotage.describeKabelChance(targetRank, extra, support),
+    };
+  }
+  return {
+    baseCost: sabotage.SABOTAGE_TABLE[fromRank].baseCost,
+    baseChance: sabotage.SABOTAGE_TABLE[fromRank].baseChance,
+    step: sabotage.SABOTAGE_EXTRA_STEP,
+    bonus: sabotage.SABOTAGE_EXTRA_BONUS,
+    maxChance: sabotage.SABOTAGE_MAX_CHANCE,
+    getCost: (extra) => sabotage.getSabotajCost(fromRank, extra),
+    getChance: (extra, support) => sabotage.calculateSabotajChance(fromRank, extra, support),
+    describe: (extra, support) => sabotage.describeSabotajChance(fromRank, extra, support),
+  };
+}
+
+function renderSabotajBreakdown(breakdown, targetHasPublicSupport) {
   const el = $('#attempt-breakdown');
   el.innerHTML = '';
   el.appendChild(makeBreakdownRow('Base Chance', `${Math.round(breakdown.base * 100)}%`));
@@ -653,19 +737,17 @@ function renderSabotajBreakdown(fromRank, extra, targetHasPublicSupport) {
   el.hidden = false;
 }
 
-function updateAttemptPreview(kind, fromRank, localPlayer, extra, targetHasPublicSupport) {
-  const table = kind === 'politik' ? politics : sabotage;
-  const cost = kind === 'politik' ? table.getPolitikCost(fromRank, extra) : table.getSabotajCost(fromRank, extra);
-  const chance = kind === 'politik'
-    ? table.calculatePolitikChance(fromRank, extra)
-    : table.calculateSabotajChance(fromRank, extra, targetHasPublicSupport);
+function updateAttemptPreview(kind, fromRank, localPlayer, extra, targetHasPublicSupport, isKabel, targetRank) {
+  const config = resolveAttemptConfig(kind, fromRank, isKabel, targetRank);
+  const cost = config.getCost(extra);
+  const chance = config.getChance(extra, targetHasPublicSupport);
 
   $('#attempt-extra-value').textContent = `+${extra}`;
   $('#attempt-cost').textContent = String(cost);
   $('#attempt-chance').textContent = `${Math.round(chance * 100)}%`;
 
   if (kind === 'sabotaj') {
-    renderSabotajBreakdown(fromRank, extra, targetHasPublicSupport);
+    renderSabotajBreakdown(config.describe(extra, targetHasPublicSupport), targetHasPublicSupport);
   } else {
     $('#attempt-breakdown').hidden = true;
   }
@@ -676,15 +758,16 @@ function updateAttemptPreview(kind, fromRank, localPlayer, extra, targetHasPubli
   if (!affordable) $('#attempt-error').textContent = 'Not enough Influence.';
 }
 
-function openAttemptModal(kind, targetId) {
+function openAttemptModal(kind, targetId, isKabel = false) {
   currentAttempt = { kind, targetId };
   const snapshot = match.getMatchSnapshot();
   const localPlayer = findLocalPlayer(snapshot);
   const fromRank = localPlayer.rank;
   const target = kind === 'sabotaj' ? snapshot.players.find((p) => p.id === targetId) : null;
   const targetHasPublicSupport = Boolean(target && target.publicSupportTurns > 0);
+  const targetRank = target ? target.rank : null;
 
-  $('#attempt-title').textContent = kind === 'politik' ? 'Politik' : 'Sabotaj';
+  $('#attempt-title').textContent = kind === 'politik' ? 'Politik' : (isKabel ? '🕴️ KABEL' : 'Sabotaj');
   $('#btn-attempt-confirm .menu-btn-label').textContent = kind === 'sabotaj' ? 'Attack' : 'Confirm';
 
   const targetLine = $('#attempt-target-line');
@@ -697,12 +780,8 @@ function openAttemptModal(kind, targetId) {
     targetLine.hidden = true;
   }
 
-  const table = kind === 'politik' ? politics : sabotage;
-  const config = table[kind === 'politik' ? 'PROMOTION_TABLE' : 'SABOTAGE_TABLE'][fromRank];
-  const maxChance = kind === 'politik' ? politics.PROMOTION_MAX_CHANCE : sabotage.SABOTAGE_MAX_CHANCE;
-  const bonus = kind === 'politik' ? politics.PROMOTION_EXTRA_BONUS : sabotage.SABOTAGE_EXTRA_BONUS;
-  const step = kind === 'politik' ? politics.PROMOTION_EXTRA_STEP : sabotage.SABOTAGE_EXTRA_STEP;
-  const baseCost = config.baseCost;
+  const config = resolveAttemptConfig(kind, fromRank, isKabel, targetRank);
+  const { maxChance, bonus, step, baseCost } = config;
 
   const maxStepsForChance = Math.ceil((maxChance - config.baseChance) / bonus);
   const maxAffordableExtra = Math.max(0, localPlayer.influence - baseCost);
@@ -714,9 +793,9 @@ function openAttemptModal(kind, targetId) {
   slider.max = String(maxExtra);
   slider.step = String(step);
   slider.value = '0';
-  slider.oninput = () => updateAttemptPreview(kind, fromRank, localPlayer, Number(slider.value), targetHasPublicSupport);
+  slider.oninput = () => updateAttemptPreview(kind, fromRank, localPlayer, Number(slider.value), targetHasPublicSupport, isKabel, targetRank);
 
-  updateAttemptPreview(kind, fromRank, localPlayer, 0, targetHasPublicSupport);
+  updateAttemptPreview(kind, fromRank, localPlayer, 0, targetHasPublicSupport, isKabel, targetRank);
   $('#attempt-modal').hidden = false;
 }
 
@@ -745,9 +824,10 @@ function handleActionFeedback(snapshot) {
   } else if (action.type === 'sabotaj') {
     const target = snapshot.players.find((p) => p.id === action.targetId);
     const targetName = target ? target.name : 'a player';
+    const label = action.isKabel ? 'KABEL' : 'Sabotaj';
     message = action.success
-      ? `${actorName} sabotaged ${targetName} and took their seat!`
-      : `${actorName}'s Sabotaj on ${targetName} failed.`;
+      ? `${actorName} used ${label} on ${targetName} and took their seat!`
+      : `${actorName}'s ${label} on ${targetName} failed.`;
     if (action.success) sound.playPromotion(); else sound.playFailure();
   } else if (action.type === 'skip') {
     message = `Host skipped ${actorName}'s turn.`;
@@ -763,6 +843,36 @@ function handleActionFeedback(snapshot) {
     });
     sound.playWarning();
   }
+}
+
+// Full per-player match summary (Feature 8) - Money/Influence/Scandal plus
+// the counters tracked in player.stats throughout the match.
+function makeStatsGrid(player) {
+  const grid = document.createElement('div');
+  grid.className = 'match-end-stats-grid';
+  [
+    ['Money', formatMoney(player.money)],
+    ['Influence', String(player.influence)],
+    ['Scandal', `${player.scandal}%`],
+    ['Projects', String(player.stats.projectsCompleted)],
+    ['Promotions', String(player.stats.promotionsSucceeded)],
+    ['Sabotages', String(player.stats.sabotagesSucceeded)],
+    ['Media Used', String(player.stats.mediaCardsUsed)],
+    ['Turns', String(player.stats.turnsPlayed)],
+  ].forEach(([label, value]) => {
+    const item = document.createElement('div');
+    item.className = 'match-end-stat-item';
+    const labelEl = document.createElement('span');
+    labelEl.className = 'match-end-stat-label';
+    labelEl.textContent = label;
+    const valueEl = document.createElement('span');
+    valueEl.className = 'match-end-stat-value';
+    valueEl.textContent = value;
+    item.appendChild(labelEl);
+    item.appendChild(valueEl);
+    grid.appendChild(item);
+  });
+  return grid;
 }
 
 function renderMatchEnd(snapshot) {
@@ -785,8 +895,10 @@ function renderMatchEnd(snapshot) {
     sub.className = 'match-end-winner-sub';
     sub.textContent = winner.rank === 'president'
       ? 'Presiden'
-      : `Highest rank at Round 10: ${RANK_LABELS[winner.rank]}`;
+      : `Highest rank at Round ${snapshot.maxRounds}: ${RANK_LABELS[winner.rank]}`;
     winnerEl.appendChild(sub);
+
+    winnerEl.appendChild(makeStatsGrid(winner));
   }
 
   const standingsEl = $('#match-end-standings');
@@ -796,12 +908,15 @@ function renderMatchEnd(snapshot) {
     .sort((a, b) => RANKS.indexOf(b.rank) - RANKS.indexOf(a.rank) || a.scandal - b.scandal)
     .forEach((p) => {
       const li = document.createElement('li');
-      li.className = 'lobby-player-row';
+      li.className = 'match-end-player-row';
+
+      const header = document.createElement('div');
+      header.className = 'match-end-player-header';
 
       const avatar = document.createElement('div');
       avatar.className = 'lobby-player-avatar';
-      avatar.innerHTML = renderAvatarSVG(p.avatar, 44);
-      li.appendChild(avatar);
+      avatar.innerHTML = renderAvatarSVG(p.avatar, 40);
+      header.appendChild(avatar);
 
       const info = document.createElement('div');
       info.className = 'lobby-player-info';
@@ -809,21 +924,41 @@ function renderMatchEnd(snapshot) {
       name.className = 'lobby-player-name';
       name.textContent = p.name;
       info.appendChild(name);
-      li.appendChild(info);
+      header.appendChild(info);
 
       const badge = document.createElement('span');
       badge.className = `lobby-ready-badge${p.id === snapshot.winnerId ? ' is-ready' : ''}`;
       badge.textContent = RANK_LABELS[p.rank];
-      li.appendChild(badge);
+      header.appendChild(badge);
 
+      li.appendChild(header);
+      li.appendChild(makeStatsGrid(p));
       standingsEl.appendChild(li);
     });
 
   sound.playPromotion();
 }
 
+// A National Event is a top-layer announcement, not a screen of its own -
+// it can land on top of the match screen mid-game or right as the match
+// ends, and either way just sits above whatever's already rendered until
+// the player dismisses it locally (no host round-trip needed for that,
+// since the round/effects have already been applied server-side).
+function showNationalEventOverlay(pending) {
+  if (!pending || pending.seq === lastSeenEventSeq) return;
+  lastSeenEventSeq = pending.seq;
+  const { event } = pending;
+  $('#national-event-icon').textContent = event.icon;
+  $('#national-event-name').textContent = event.name;
+  $('#national-event-description').textContent = event.description;
+  $('#national-event-overlay').hidden = false;
+  sound.playWarning();
+}
+
 function renderMatchScreen(snapshot) {
   if (!snapshot.started) return;
+
+  showNationalEventOverlay(snapshot.pendingNationalEvent);
 
   if (snapshot.matchOver) {
     if (!hasEnteredMatchEndScreen) {
@@ -839,7 +974,7 @@ function renderMatchScreen(snapshot) {
     showScreen('match');
   }
 
-  $('#match-round-label').textContent = `ROUND ${snapshot.round} / 10`;
+  $('#match-round-label').textContent = `ROUND ${snapshot.round} / ${snapshot.maxRounds}`;
   renderMatchPlayerList(snapshot);
   renderHierarchy(snapshot);
   renderActionPanel(snapshot);
@@ -882,15 +1017,7 @@ function wireMatchActions() {
 
   $('#btn-action-sabotaj').addEventListener('click', () => {
     sound.playClick();
-    const snapshot = match.getMatchSnapshot();
-    const localPlayer = findLocalPlayer(snapshot);
-    const nextRank = getNextRank(localPlayer.rank);
-    if (!nextRank) return;
-    if (hasOpenSeat(snapshot.players, nextRank)) {
-      showToast('The seat is not full — use Politik instead.');
-      return;
-    }
-    openTargetPicker({ mode: 'sabotaj', rank: nextRank });
+    match.requestSabotajOptions();
   });
 
   $('#btn-picker-cancel').addEventListener('click', () => {
@@ -922,8 +1049,14 @@ function wireMatchActions() {
     hasEnteredMatchScreen = false;
     hasEnteredMatchEndScreen = false;
     lastHandledActionSeq = -1;
+    lastSeenEventSeq = -1;
     wasMyTurn = false;
     showScreen('main-menu');
+  });
+
+  $('#btn-national-event-continue').addEventListener('click', () => {
+    sound.playClick();
+    $('#national-event-overlay').hidden = true;
   });
 }
 
@@ -940,6 +1073,25 @@ function wireMatchEvents() {
   });
   bus.on('match:action-rejected', (e) => {
     showToast(ACTION_REJECT_MESSAGES[e.detail.reason] || 'Action not available.');
+  });
+  bus.on('match:sabotaj-options', (e) => {
+    const snapshot = match.getMatchSnapshot();
+    if (snapshot.activePlayerId !== snapshot.localPlayerId) return;
+    const localPlayer = findLocalPlayer(snapshot);
+    const { isKabel } = e.detail;
+
+    if (isKabel) {
+      openTargetPicker({ mode: 'sabotaj', isKabel: true });
+      return;
+    }
+
+    const nextRank = getNextRank(localPlayer.rank);
+    if (!nextRank) return;
+    if (hasOpenSeat(snapshot.players, nextRank)) {
+      showToast('The seat is not full — use Politik instead.');
+      return;
+    }
+    openTargetPicker({ mode: 'sabotaj', rank: nextRank, isKabel: false });
   });
 }
 

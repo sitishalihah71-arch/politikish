@@ -1,7 +1,9 @@
 // Host-authoritative match state: turn order, round counter, and dispatching
-// the four actions. Mirrors room.js's pattern - the host resolves and
-// broadcasts, clients request and render. `ui.js` renders whatever this
-// module emits via `bus` under the `match:*` events.
+// the four actions (plus the Kabel roll and National Events, both of which
+// extend the existing action/turn flow rather than adding parallel systems).
+// Mirrors room.js's pattern - the host resolves and broadcasts, clients
+// request and render. `ui.js` renders whatever this module emits via `bus`
+// under the `match:*` events.
 //
 // Player *identity/connection* (id/slot/connected/name/avatar) stays owned
 // by room.js throughout - including during a match, since Module 2's
@@ -19,12 +21,13 @@ import { applyScandalPenalty, tickPublicSupport } from './effects.js';
 import { generateProjectOffers, resolveProjek } from './projects.js';
 import { generateMediaOffers, resolveMedia } from './media.js';
 import { resolvePolitik } from './politics.js';
-import { resolveSabotaj } from './sabotage.js';
-
-const MAX_ROUNDS = 10;
+import { resolveSabotaj, KABEL_SPAWN_CHANCE } from './sabotage.js';
+import { pickNationalEvent, applyNationalEvent } from './events.js';
+import { GAME_BALANCE } from './balance.js';
 
 let matchStarted = false;
 let currentRound = 1;
+let maxRounds = GAME_BALANCE.room.defaultRounds; // captured from room settings at match start
 let turnSlot = 1;
 let matchOver = false;
 let winnerId = null;
@@ -32,6 +35,20 @@ let clientPlayers = []; // client-side cache; irrelevant on host (uses room.getP
 let lastAction = null; // descriptor of the most recently resolved action, for toasts/sound cues
 let lastPenalized = []; // player ids hit by the 100% scandal penalty on the last turn
 let actionSeq = 0; // lets ui.js tell a genuinely new action apart from a re-broadcast echo
+
+// KABEL: once it appears (whether used or ignored) it's gone for the rest
+// of the match. `kabelModeForActivePlayer` is the host's own memory of the
+// roll it just made for the current active player's Sabotaj attempt - the
+// actual attempt is resolved against this, never against anything the
+// client claims, so a client can't just declare isKabel:true.
+let kabelAvailable = true;
+let kabelModeForActivePlayer = false;
+
+// Host picks and applies the event, then broadcasts it once (with a seq so
+// clients can tell a new event apart from a re-broadcast) - every client
+// shows the full-screen announcement and dismisses it locally on Continue.
+let pendingNationalEvent = null;
+let eventSeq = 0;
 
 function isHostRole() {
   return room.getRoomSnapshot().isHost;
@@ -51,7 +68,8 @@ export function getMatchSnapshot() {
   const active = getActivePlayer(players);
   return {
     started: matchStarted,
-    round: Math.min(currentRound, MAX_ROUNDS),
+    round: Math.min(currentRound, maxRounds),
+    maxRounds,
     turnSlot,
     activePlayerId: active ? active.id : null,
     matchOver,
@@ -61,18 +79,21 @@ export function getMatchSnapshot() {
     isHost: roomSnap.isHost,
     lastAction,
     lastPenalized,
+    pendingNationalEvent,
   };
 }
 
 function buildBroadcastPayload() {
   return {
     round: currentRound,
+    maxRounds,
     turnSlot,
     matchOver,
     winnerId,
     players: currentPlayers().map((p) => ({ ...p })),
     lastAction,
     lastPenalized,
+    pendingNationalEvent,
   };
 }
 
@@ -100,11 +121,27 @@ function endMatch(players) {
   broadcastMatchUpdate();
 }
 
+// Fires once when `completedRound` is a National Events milestone (every
+// `intervalRounds` rounds) and the host has the setting on. Applies the
+// event to every player immediately (host-authoritative "final outcome"),
+// same as every other action - the announcement is purely a presentational
+// pause layered on top by ui.js, not a second source of truth.
+function maybeTriggerNationalEvent(completedRound, players) {
+  if (completedRound === null) return;
+  if (!room.getRoomSnapshot().settings.nationalEvents) return;
+  if (completedRound % GAME_BALANCE.nationalEvents.intervalRounds !== 0) return;
+
+  const event = pickNationalEvent();
+  players.forEach((p) => applyNationalEvent(event, p));
+  eventSeq += 1;
+  pendingNationalEvent = { event, seq: eventSeq };
+}
+
 // Turn order cycles through whichever slots are actually present, sorted
-// ascending - not a hardcoded 1..4 range. This has to hold up in two cases:
-// starting a match with fewer than 4 people, and a player being permanently
-// removed (reconnect grace period expiring) mid-match, which can leave a gap
-// in the slot numbers.
+// ascending - not a hardcoded 1..N range. This has to hold up in two cases:
+// starting a match with fewer players than the room's cap, and a player
+// being permanently removed (reconnect grace period expiring) mid-match,
+// which can leave a gap in the slot numbers.
 //
 // Public Support only decays at the end of its own owner's turn (not on
 // every turn taken at the table), so only the player whose turn is ending
@@ -114,7 +151,10 @@ function endMatch(players) {
 function advanceTurn({ skipSupportTick = false } = {}) {
   const players = room.getPlayersLive();
   const endingPlayer = players.find((p) => p.slot === turnSlot);
-  if (endingPlayer && !skipSupportTick) tickPublicSupport(endingPlayer);
+  if (endingPlayer) {
+    if (!skipSupportTick) tickPublicSupport(endingPlayer);
+    endingPlayer.stats.turnsPlayed += 1;
+  }
   lastPenalized = players.filter((p) => applyScandalPenalty(p, players)).map((p) => p.id);
 
   const activeSlots = players.map((p) => p.slot).sort((a, b) => a - b);
@@ -123,13 +163,15 @@ function advanceTurn({ skipSupportTick = false } = {}) {
   const currentIndex = activeSlots.indexOf(turnSlot);
   let nextIndex = currentIndex === -1 ? 0 : currentIndex + 1;
   let round = currentRound;
+  // Only the primary wrap counts as a "completed round" for the National
+  // Event check - if a chain of disconnected players causes the guard loop
+  // below to wrap more than once in the same call, that's an already-rare
+  // edge case and only the first completed round is treated as a milestone.
+  let completedRound = null;
   if (nextIndex >= activeSlots.length) {
     nextIndex = 0;
+    completedRound = round;
     round += 1;
-  }
-  if (round > MAX_ROUNDS) {
-    endMatch(players);
-    return;
   }
 
   let guard = 0;
@@ -140,16 +182,20 @@ function advanceTurn({ skipSupportTick = false } = {}) {
     if (nextIndex >= activeSlots.length) {
       nextIndex = 0;
       round += 1;
-      if (round > MAX_ROUNDS) {
-        endMatch(players);
-        return;
-      }
     }
     guard += 1;
   }
 
   turnSlot = activeSlots[nextIndex];
   currentRound = round;
+
+  maybeTriggerNationalEvent(completedRound, players);
+
+  if (round > maxRounds) {
+    endMatch(players);
+    return;
+  }
+
   broadcastMatchUpdate();
 }
 
@@ -168,9 +214,10 @@ function setLastAction(action) {
 
 function hostResolveProjek(playerId, cardId) {
   if (!isActivePlayerId(playerId)) return;
-  const player = room.getPlayersLive().find((p) => p.id === playerId);
+  const players = room.getPlayersLive();
+  const player = players.find((p) => p.id === playerId);
   if (!player) return;
-  const card = resolveProjek(player, cardId);
+  const card = resolveProjek(player, cardId, players.length);
   if (!card) return;
   setLastAction({ type: 'projek', actorId: playerId, card });
   advanceTurn();
@@ -209,17 +256,35 @@ function hostResolvePolitik(playerId, extraInfluence, respond) {
   advanceTurn();
 }
 
+// Card-generation step for Sabotaj, mirroring requestProjekOffers/
+// requestMediaOffers - the only "random data" here is whether Kabel is
+// being offered this attempt, so that's all the response carries. The
+// roll result is remembered host-side (`kabelModeForActivePlayer`) and is
+// what the actual attempt gets resolved against - never whatever a client
+// might claim.
+function hostResolveSabotajOptions(playerId, respond) {
+  if (!isActivePlayerId(playerId)) return;
+  kabelModeForActivePlayer = false;
+  if (kabelAvailable && Math.random() < KABEL_SPAWN_CHANCE) {
+    kabelModeForActivePlayer = true;
+    kabelAvailable = false; // consumed the instant it appears, whether used or not
+  }
+  respond({ type: 'sabotaj-options', payload: { isKabel: kabelModeForActivePlayer } });
+}
+
 function hostResolveSabotaj(playerId, targetId, extraInfluence, respond) {
   if (!isActivePlayerId(playerId)) return;
   const players = room.getPlayersLive();
   const player = players.find((p) => p.id === playerId);
   const target = players.find((p) => p.id === targetId);
   if (!player) return;
-  const result = resolveSabotaj(player, target, players, extraInfluence);
+  const isKabel = kabelModeForActivePlayer;
+  const result = resolveSabotaj(player, target, players, extraInfluence, { isKabel });
   if (!result.ok) {
     respond({ type: 'action-rejected', payload: { reason: result.reason } });
     return;
   }
+  kabelModeForActivePlayer = false;
   setLastAction({
     type: 'sabotaj',
     actorId: playerId,
@@ -228,6 +293,7 @@ function hostResolveSabotaj(playerId, targetId, extraInfluence, respond) {
     chance: result.chance,
     cost: result.cost,
     toRank: result.toRank,
+    isKabel: result.isKabel,
   });
   advanceTurn();
 }
@@ -251,6 +317,9 @@ function handleHostMatchMessage(type, payload, conn) {
   } else if (type === 'politik-attempt') {
     if (!isFromConn(conn)) return;
     hostResolvePolitik(conn.peer, payload?.extraInfluence || 0, respond);
+  } else if (type === 'sabotaj-start') {
+    if (!isFromConn(conn)) return;
+    hostResolveSabotajOptions(conn.peer, respond);
   } else if (type === 'sabotaj-attempt') {
     if (!isFromConn(conn)) return;
     hostResolveSabotaj(conn.peer, payload?.targetId, payload?.extraInfluence || 0, respond);
@@ -266,17 +335,21 @@ function isFromConn(conn) {
 function handleClientMatchMessage(type, payload) {
   if (type === 'match-update') {
     currentRound = payload.round;
+    maxRounds = payload.maxRounds;
     turnSlot = payload.turnSlot;
     matchOver = payload.matchOver;
     winnerId = payload.winnerId;
     clientPlayers = payload.players;
     lastAction = payload.lastAction;
     lastPenalized = payload.lastPenalized || [];
+    pendingNationalEvent = payload.pendingNationalEvent || null;
     bus.emit('match:updated', getMatchSnapshot());
   } else if (type === 'projek-offers') {
     bus.emit('match:offers', { action: 'projek', offers: payload.offers });
   } else if (type === 'media-offers') {
     bus.emit('match:offers', { action: 'media', offers: payload.offers });
+  } else if (type === 'sabotaj-options') {
+    bus.emit('match:sabotaj-options', { isKabel: Boolean(payload.isKabel) });
   } else if (type === 'action-rejected') {
     bus.emit('match:action-rejected', { reason: payload.reason });
   }
@@ -327,6 +400,19 @@ export function attemptPolitik(extraInfluence) {
   }
 }
 
+// Rolls (host-side) whether this Sabotaj attempt gets the Kabel treatment.
+// Must be called before opening the target picker so ui.js knows which
+// candidate list and chance table to use.
+export function requestSabotajOptions() {
+  if (isHostRole()) {
+    hostResolveSabotajOptions(room.getRoomSnapshot().localPlayerId, (msg) => {
+      bus.emit('match:sabotaj-options', msg.payload);
+    });
+  } else {
+    multiplayer.send({ type: 'sabotaj-start' });
+  }
+}
+
 export function attemptSabotaj(targetId, extraInfluence) {
   if (isHostRole()) {
     hostResolveSabotaj(room.getRoomSnapshot().localPlayerId, targetId, extraInfluence, (msg) => {
@@ -355,6 +441,12 @@ bus.on('room:match-started', () => {
   matchStarted = true;
   matchOver = false;
   winnerId = null;
+  kabelAvailable = true;
+  kabelModeForActivePlayer = false;
+  pendingNationalEvent = null;
+
+  const roomSnap = room.getRoomSnapshot();
+  maxRounds = roomSnap.settings.rounds;
 
   if (isHostRole()) {
     const players = room.getPlayersLive();
@@ -386,8 +478,12 @@ bus.on('room:updated', () => {
 export function resetMatch() {
   matchStarted = false;
   currentRound = 1;
+  maxRounds = GAME_BALANCE.room.defaultRounds;
   turnSlot = 1;
   matchOver = false;
   winnerId = null;
   clientPlayers = [];
+  kabelAvailable = true;
+  kabelModeForActivePlayer = false;
+  pendingNationalEvent = null;
 }

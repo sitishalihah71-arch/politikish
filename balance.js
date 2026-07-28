@@ -34,4 +34,39 @@ export const GAME_BALANCE = {
   publicSupport: {
     scandalReduction: 50,
   },
+
+  room: {
+    playerOptions: [2, 3, 4, 5, 6],
+    defaultPlayers: 4,
+    roundOptions: [10, 20, 30, 40, 50],
+    defaultRounds: 10,
+    defaultNationalEvents: true,
+  },
+
+  // Seat capacity per rank is derived from the live player count (N) as
+  // N minus these offsets, floored at 1 - president is always exactly 1
+  // seat regardless of player count (there's only ever one winner). With
+  // the default offsets this reproduces the original fixed 4-player
+  // layout exactly (4/3/2/1) and generalizes to any player count without
+  // further changes.
+  hierarchy: {
+    seatOffsets: { ahli: 0, ketua: 1, deputy: 2 },
+  },
+
+  // Projek rewards shrink slightly as the table gets bigger, so a 6-player
+  // match doesn't flood the economy compared to a 2-player one.
+  economy: {
+    baselinePlayers: 2,
+    projekRewardReductionPerExtraPlayerPercent: 5,
+  },
+
+  nationalEvents: {
+    intervalRounds: 10,
+  },
+
+  kabel: {
+    cost: 500,
+    spawnChancePercent: 4,
+    targetChances: { ketua: 50, deputy: 30, president: 15 },
+  },
 };

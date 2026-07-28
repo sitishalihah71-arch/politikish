@@ -3,6 +3,7 @@
 
 import { pickRandomUnique } from './utils.js';
 import { applyScandalDelta } from './effects.js';
+import { getEconomyScale } from './player.js';
 
 export const PROJECT_CARDS = [
   { id: 'small', name: 'Projek Kecil', money: 10000, influence: 50, scandal: 5 },
@@ -19,13 +20,17 @@ export function getProjectCard(id) {
 }
 
 // Mutates `player` directly. Returns the applied card for the caller to
-// surface as feedback.
-export function resolveProjek(player, cardId) {
+// surface as feedback. Money/influence rewards scale down slightly as the
+// table grows (see getEconomyScale) so a full room doesn't flood the
+// economy compared to a small one - scandal cost is untouched.
+export function resolveProjek(player, cardId, playerCount) {
   const card = getProjectCard(cardId);
   if (!card) return null;
 
-  player.money += card.money;
-  player.influence += card.influence;
+  const scale = getEconomyScale(playerCount);
+  player.money += Math.round(card.money * scale);
+  player.influence += Math.round(card.influence * scale);
   applyScandalDelta(player, card.scandal);
+  player.stats.projectsCompleted += 1;
   return card;
 }

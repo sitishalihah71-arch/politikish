@@ -3,8 +3,9 @@
 // whatever this module broadcasts via `bus`.
 
 import { bus, generateRoomCode, saveSession, clearSession } from './utils.js';
-import { createPlayer, MAX_PLAYERS } from './player.js';
+import { createPlayer } from './player.js';
 import { normalizeAvatar } from './avatar.js';
+import { GAME_BALANCE } from './balance.js';
 import * as multiplayer from './multiplayer.js';
 
 const RECONNECT_GRACE_MS = 120000;
@@ -12,13 +13,26 @@ const CREATE_ROOM_MAX_ATTEMPTS = 5;
 const MAX_NAME_LENGTH = 16;
 
 // A match needs at least two players to be a contest at all - the upper
-// bound (MAX_PLAYERS) is still enforced separately when players join.
+// bound is the host-selected `gameSettings.maxPlayers`, enforced when
+// players join.
 export const MIN_PLAYERS_TO_START = 2;
+
+function defaultSettings() {
+  return {
+    maxPlayers: GAME_BALANCE.room.defaultPlayers,
+    rounds: GAME_BALANCE.room.defaultRounds,
+    nationalEvents: GAME_BALANCE.room.defaultNationalEvents,
+  };
+}
 
 let role = null; // 'host' | 'client' | null
 let roomCode = null;
 let localPlayerId = null;
 let players = [];
+// Host-authoritative room settings (players/rounds/national events), same
+// sharing pattern as `players`: the host mutates it directly, clients only
+// ever receive it over the wire.
+let gameSettings = defaultSettings();
 const connectionsByPlayerId = new Map();
 const reconnectTimers = new Map();
 
@@ -42,7 +56,7 @@ function dedupeName(name) {
 
 function nextAvailableSlot() {
   const used = new Set(players.map((p) => p.slot));
-  for (let s = 1; s <= MAX_PLAYERS; s++) {
+  for (let s = 1; s <= gameSettings.maxPlayers; s++) {
     if (!used.has(s)) return s;
   }
   return null;
@@ -54,11 +68,12 @@ function getRoomSnapshot() {
     isHost: role === 'host',
     localPlayerId,
     players: players.map((p) => ({ ...p })),
+    settings: { ...gameSettings },
   };
 }
 
 function broadcastRoomUpdate() {
-  multiplayer.send({ type: 'room-update', payload: { players: getRoomSnapshot().players } });
+  multiplayer.send({ type: 'room-update', payload: { players: getRoomSnapshot().players, settings: gameSettings } });
 }
 
 function clearReconnectTimer(playerId) {
@@ -87,7 +102,7 @@ function handleJoinRequest(conn, rawName) {
     connectionsByPlayerId.set(existing.id, conn);
 
     multiplayer.send(
-      { type: 'join-accepted', payload: { playerId: existing.id, roomCode, players: getRoomSnapshot().players } },
+      { type: 'join-accepted', payload: { playerId: existing.id, roomCode, players: getRoomSnapshot().players, settings: gameSettings } },
       conn,
     );
     broadcastRoomUpdate();
@@ -95,7 +110,7 @@ function handleJoinRequest(conn, rawName) {
     return;
   }
 
-  if (players.length >= MAX_PLAYERS) {
+  if (players.length >= gameSettings.maxPlayers) {
     multiplayer.send({ type: 'join-rejected', payload: { reason: 'room-full' } }, conn);
     conn.close();
     return;
@@ -107,7 +122,7 @@ function handleJoinRequest(conn, rawName) {
   connectionsByPlayerId.set(player.id, conn);
 
   multiplayer.send(
-    { type: 'join-accepted', payload: { playerId: player.id, roomCode, players: getRoomSnapshot().players } },
+    { type: 'join-accepted', payload: { playerId: player.id, roomCode, players: getRoomSnapshot().players, settings: gameSettings } },
     conn,
   );
   broadcastRoomUpdate();
@@ -169,6 +184,7 @@ export async function createRoom(hostName) {
       roomCode = code;
       localPlayerId = 'host';
       players = [createPlayer({ id: 'host', slot: 1, name, isHost: true })];
+      gameSettings = defaultSettings();
 
       multiplayer.onPeerLeft(handleConnectionClosed);
       multiplayer.onMessage(handleHostMessage);
@@ -197,6 +213,7 @@ export async function joinRoom(code, playerName) {
     if (type === 'join-accepted') {
       localPlayerId = payload.playerId;
       players = payload.players;
+      gameSettings = payload.settings || gameSettings;
       saveSession({ roomCode: normalizedCode, name, playerId: localPlayerId });
       bus.emit('room:joined', getRoomSnapshot());
     } else if (type === 'join-rejected') {
@@ -204,6 +221,7 @@ export async function joinRoom(code, playerName) {
       leaveRoom();
     } else if (type === 'room-update') {
       players = payload.players;
+      gameSettings = payload.settings || gameSettings;
       bus.emit('room:updated', getRoomSnapshot());
     } else if (type === 'match-start') {
       bus.emit('room:match-started', getRoomSnapshot());
@@ -232,6 +250,7 @@ export function leaveRoom() {
   roomCode = null;
   localPlayerId = null;
   players = [];
+  gameSettings = defaultSettings();
   clearSession();
 }
 
@@ -261,8 +280,23 @@ export function setLocalReady(ready) {
   }
 }
 
+// Host-only: change players/rounds/national-events pre-match. Validated
+// against the option lists so a stray value can never desync the room -
+// invalid partial fields are just dropped rather than rejecting the whole
+// update, since each field is otherwise independent.
+export function updateSettings(partial) {
+  if (role !== 'host') return;
+  const next = { ...gameSettings };
+  if (GAME_BALANCE.room.playerOptions.includes(partial.maxPlayers)) next.maxPlayers = partial.maxPlayers;
+  if (GAME_BALANCE.room.roundOptions.includes(partial.rounds)) next.rounds = partial.rounds;
+  if (typeof partial.nationalEvents === 'boolean') next.nationalEvents = partial.nationalEvents;
+  gameSettings = next;
+  broadcastRoomUpdate();
+  bus.emit('room:updated', getRoomSnapshot());
+}
+
 export function canStartMatch() {
-  return players.length >= MIN_PLAYERS_TO_START && players.every((p) => p.connected && p.ready);
+  return players.length === gameSettings.maxPlayers && players.every((p) => p.connected && p.ready);
 }
 
 export function startMatch() {

@@ -2,7 +2,7 @@
 // Pure state mutations - no networking, no DOM.
 
 import { clamp } from './utils.js';
-import { RANKS, SEAT_CAPACITY } from './player.js';
+import { RANKS, getSeatCapacity } from './player.js';
 import { GAME_BALANCE } from './balance.js';
 
 export const SCANDAL_PENALTY_THRESHOLD = GAME_BALANCE.scandal.penaltyThreshold;
@@ -48,7 +48,7 @@ export function applyScandalPenalty(player, players) {
   const index = RANKS.indexOf(player.rank);
   if (index > 0) {
     const lowerRank = RANKS[index - 1];
-    if (countAtRank(players, lowerRank) < SEAT_CAPACITY[lowerRank]) {
+    if (countAtRank(players, lowerRank) < getSeatCapacity(players.length)[lowerRank]) {
       player.rank = lowerRank;
     }
   }
@@ -60,5 +60,5 @@ export function countAtRank(players, rank) {
 }
 
 export function hasOpenSeat(players, rank) {
-  return countAtRank(players, rank) < SEAT_CAPACITY[rank];
+  return countAtRank(players, rank) < getSeatCapacity(players.length)[rank];
 }

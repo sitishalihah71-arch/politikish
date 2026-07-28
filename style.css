@@ -549,6 +549,56 @@ button {
   cursor: not-allowed;
 }
 
+.lobby-settings-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  padding: 10px 14px;
+}
+
+.lobby-settings-summary-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.lobby-settings-summary-row strong {
+  color: var(--text-primary);
+}
+
+.lobby-settings-events-badge {
+  color: var(--text-muted);
+}
+
+.lobby-settings-events-badge.is-on {
+  color: var(--green);
+}
+
+.lobby-settings-edit {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  background: var(--bg-card);
+  border-radius: var(--radius-sm);
+  padding: 12px 14px;
+}
+
+.field-select {
+  background: var(--bg-panel);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  font-size: 14px;
+  font-family: inherit;
+  padding: 6px 10px;
+}
+
 /* ---------- Toast ---------- */
 
 .toast {
@@ -600,6 +650,48 @@ button {
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius);
   padding: 20px;
+}
+
+/* National Event announcement is a top-layer pause, not a screen - it can
+   land on top of the match or match-end screen either way, so it sits above
+   every other modal too. */
+.national-event-overlay {
+  z-index: 200;
+  background: rgba(4, 6, 10, 0.85);
+}
+
+.national-event-card {
+  width: min(340px, calc(100vw - 32px));
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 12px;
+  padding: 32px 24px;
+  border-color: var(--gold-dim);
+}
+
+.national-event-icon {
+  font-size: 48px;
+  line-height: 1;
+}
+
+.national-event-name {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 800;
+  color: var(--gold);
+}
+
+.national-event-description {
+  margin: 0;
+  font-size: 14px;
+  color: var(--text-secondary);
+}
+
+.national-event-card .menu-btn {
+  width: 100%;
+  margin-top: 8px;
 }
 
 .modal-header {
@@ -1182,6 +1274,55 @@ button {
   height: 36px;
 }
 
+/* KABEL - legendary appearance: gold border + glow, dropped into the
+   existing target-picker modal rather than a new design. */
+.legendary-banner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+  padding: 12px 14px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--gold);
+  background: linear-gradient(135deg, rgba(240, 193, 75, 0.16), rgba(240, 193, 75, 0.04));
+  box-shadow: 0 0 16px rgba(240, 193, 75, 0.35);
+}
+
+.legendary-banner[hidden] {
+  display: none;
+}
+
+.legendary-banner-icon {
+  font-size: 28px;
+  flex-shrink: 0;
+}
+
+.legendary-banner-title {
+  font-size: 14px;
+  font-weight: 800;
+  color: var(--gold);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.legendary-tag {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: var(--gold);
+  color: #241a03;
+}
+
+.legendary-banner-desc {
+  margin: 2px 0 0;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
 .attempt-breakdown {
   display: flex;
   flex-direction: column;
@@ -1296,6 +1437,51 @@ button {
 
 #match-end-standings {
   width: 100%;
+}
+
+.match-end-player-row {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  padding: 10px 14px;
+}
+
+.match-end-player-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.match-end-stats-grid {
+  width: 100%;
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 6px 14px;
+}
+
+#match-end-winner .match-end-stats-grid {
+  margin-top: 4px;
+  background: var(--bg-card);
+  border-radius: var(--radius-sm);
+  padding: 10px 14px;
+}
+
+.match-end-stat-item {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+}
+
+.match-end-stat-label {
+  color: var(--text-secondary);
+}
+
+.match-end-stat-value {
+  font-weight: 700;
+  color: var(--text-primary);
 }
 
 #btn-match-end-menu {

@@ -52,6 +52,7 @@ export function resolvePolitik(player, players, extraInfluence, rng = Math.rando
   const success = rng() < chance;
   if (success) {
     player.rank = toRank;
+    player.stats.promotionsSucceeded += 1;
     applyScandalDelta(player, -15);
   }
 
