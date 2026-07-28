@@ -33,7 +33,6 @@ export const KABEL_TABLE = {
   president: { chance: kabelCfg.targetChances.president / 100 },
 };
 export const KABEL_COST = kabelCfg.cost;
-export const KABEL_SPAWN_CHANCE = kabelCfg.spawnChancePercent / 100;
 
 // Shared by both normal Sabotaj and Kabel - only the base chance differs.
 function computeChanceBreakdown(baseChance, extraInfluence, targetHasPublicSupport) {

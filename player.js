@@ -62,6 +62,11 @@ export function initMatchState(player) {
     mediaCardsUsed: 0,
     turnsPlayed: 0,
   };
+  // Political Network progress and KABEL ownership are completely private -
+  // match.js masks both out of every other player's view of this object
+  // before it ever reaches the network (see maskPlayersFor in match.js).
+  player.politicalNetwork = { infrastructure: 0, publicServices: 0, administration: 0 };
+  player.hasKabel = false;
 }
 
 export function getNextRank(rank) {

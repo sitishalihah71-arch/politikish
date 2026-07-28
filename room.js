@@ -315,4 +315,12 @@ export function getPlayersLive() {
   return players;
 }
 
+// Host-side only, mirrors getPlayersLive()'s trust model: lets match.js send
+// a *different* payload to each connected player (needed for data that must
+// stay private per-player, like Political Network progress/KABEL ownership)
+// instead of the single shared broadcast every other message type uses.
+export function getConnectionsByPlayerId() {
+  return connectionsByPlayerId;
+}
+
 export { getRoomSnapshot };

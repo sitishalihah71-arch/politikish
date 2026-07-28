@@ -1163,6 +1163,38 @@ button {
   line-height: 1.4;
 }
 
+/* Private to the local player only - never populated with another
+   player's data (see match.js's maskPlayersFor). */
+.political-network {
+  background: var(--bg-panel);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.political-network h4 {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 1px;
+  color: var(--text-secondary);
+}
+
+.political-network-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.political-network-row span:last-child {
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
 /* --- Bottom bar --- */
 
 .match-bottom-bar {
@@ -1238,6 +1270,14 @@ button {
   font-size: 14px;
   font-weight: 800;
   color: var(--text-primary);
+}
+
+.picker-card-category {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  color: var(--gold);
+  margin-top: -2px;
 }
 
 .picker-card-line {

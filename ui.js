@@ -534,6 +534,29 @@ function renderActionPanel(snapshot) {
     $('#match-scandal-pct').textContent = `${pct}%`;
     $('#scandal-bar-fill').style.width = `${100 - pct}%`;
   }
+
+  renderPoliticalNetwork(localPlayer);
+}
+
+// Political Network progress and KABEL ownership only ever appear on the
+// *local* player's own entry (see match.js's maskPlayersFor) - this panel
+// is never rendered for anyone else's data, by construction, not just by
+// convention.
+const POLITICAL_NETWORK_THRESHOLD = GAME_BALANCE.politicalNetwork.threshold;
+let hadKabel = false;
+
+function renderPoliticalNetwork(localPlayer) {
+  if (!localPlayer || !localPlayer.politicalNetwork) return;
+  const { politicalNetwork } = localPlayer;
+  $('#pn-infrastructure').textContent = `${politicalNetwork.infrastructure}/${POLITICAL_NETWORK_THRESHOLD}`;
+  $('#pn-publicServices').textContent = `${politicalNetwork.publicServices}/${POLITICAL_NETWORK_THRESHOLD}`;
+  $('#pn-administration').textContent = `${politicalNetwork.administration}/${POLITICAL_NETWORK_THRESHOLD}`;
+
+  if (localPlayer.hasKabel && !hadKabel) {
+    showToast('🕴️ Your political network paid off - you secretly hold KABEL!', 5000);
+    sound.playPromotion();
+  }
+  hadKabel = Boolean(localPlayer.hasKabel);
 }
 
 function renderBottomBar(snapshot) {
@@ -549,6 +572,11 @@ const MONEY_ICON = '💰';
 const INFLUENCE_ICON = '⭐';
 const SCANDAL_ICON = '⚠️';
 const SHIELD_ICON = '🛡️';
+const CATEGORY_LABELS = {
+  infrastructure: '🏗️ Infrastructure',
+  publicServices: '🏥 Public Services',
+  administration: '🏢 Administration',
+};
 const PUBLIC_SUPPORT_TOOLTIP = `Public Support - Incoming Scandal reduced by ${GAME_BALANCE.publicSupport.scandalReduction}%. Enemy Sabotaj success chance reduced by ${GAME_BALANCE.sabotage.publicSupportPenalty}%.`;
 
 // Appends a "🛡️N" badge after a player's name wherever it's displayed, so
@@ -595,6 +623,13 @@ function openOffersModal(action, offers) {
     name.className = 'picker-card-name';
     name.textContent = card.name;
     btn.appendChild(name);
+
+    if (action === 'projek' && card.category) {
+      const category = document.createElement('div');
+      category.className = 'picker-card-category';
+      category.textContent = CATEGORY_LABELS[card.category] || card.category;
+      btn.appendChild(category);
+    }
 
     if (action === 'projek') {
       btn.appendChild(makeCardLine(`${MONEY_ICON} +${formatMoney(card.money)}`, true));
@@ -1051,6 +1086,7 @@ function wireMatchActions() {
     lastHandledActionSeq = -1;
     lastSeenEventSeq = -1;
     wasMyTurn = false;
+    hadKabel = false;
     showScreen('main-menu');
   });
 

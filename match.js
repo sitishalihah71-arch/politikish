@@ -21,7 +21,7 @@ import { applyScandalPenalty, tickPublicSupport } from './effects.js';
 import { generateProjectOffers, resolveProjek } from './projects.js';
 import { generateMediaOffers, resolveMedia } from './media.js';
 import { resolvePolitik } from './politics.js';
-import { resolveSabotaj, KABEL_SPAWN_CHANCE } from './sabotage.js';
+import { resolveSabotaj } from './sabotage.js';
 import { pickNationalEvent, applyNationalEvent } from './events.js';
 import { GAME_BALANCE } from './balance.js';
 
@@ -36,13 +36,15 @@ let lastAction = null; // descriptor of the most recently resolved action, for t
 let lastPenalized = []; // player ids hit by the 100% scandal penalty on the last turn
 let actionSeq = 0; // lets ui.js tell a genuinely new action apart from a re-broadcast echo
 
-// KABEL: once it appears (whether used or ignored) it's gone for the rest
-// of the match. `kabelModeForActivePlayer` is the host's own memory of the
-// roll it just made for the current active player's Sabotaj attempt - the
-// actual attempt is resolved against this, never against anything the
-// client claims, so a client can't just declare isKabel:true.
-let kabelAvailable = true;
-let kabelModeForActivePlayer = false;
+// KABEL is now earned via the Political Network (see maybeRollKabelUnlock),
+// not a per-click roll. `kabelClaimed` is global - once anyone wins the
+// unlock roll, no further rolls happen for the rest of the match, whether
+// or not that owner has actually used their card yet. Whether *this*
+// player currently holds an unused card lives on the player object itself
+// (`hasKabel`), which is why hostResolveSabotajOptions below is a lookup,
+// not a roll - a client can't fake owning it since the host only ever acts
+// on its own copy of that field.
+let kabelClaimed = false;
 
 // Host picks and applies the event, then broadcasts it once (with a seq so
 // clients can tell a new event apart from a re-broadcast) - every client
@@ -62,6 +64,20 @@ function getActivePlayer(players) {
   return players.find((p) => p.slot === turnSlot) || null;
 }
 
+// Political Network progress and KABEL ownership are completely private -
+// every player's own entry keeps full data, but everyone else's copy of
+// those two fields is stripped before it ever leaves this module, whether
+// that's the payload sent to a remote client or the snapshot the host
+// builds for its own local screen (both go through this same function, so
+// there's exactly one place the privacy rule can be gotten wrong).
+function maskPlayersFor(players, viewerId) {
+  return players.map((p) => {
+    if (p.id === viewerId) return { ...p };
+    const { politicalNetwork, hasKabel, ...rest } = p;
+    return rest;
+  });
+}
+
 export function getMatchSnapshot() {
   const roomSnap = room.getRoomSnapshot();
   const players = currentPlayers();
@@ -74,7 +90,7 @@ export function getMatchSnapshot() {
     activePlayerId: active ? active.id : null,
     matchOver,
     winnerId,
-    players: players.map((p) => ({ ...p })),
+    players: maskPlayersFor(players, roomSnap.localPlayerId),
     localPlayerId: roomSnap.localPlayerId,
     isHost: roomSnap.isHost,
     lastAction,
@@ -83,22 +99,28 @@ export function getMatchSnapshot() {
   };
 }
 
-function buildBroadcastPayload() {
+function buildBroadcastPayloadFor(viewerId) {
   return {
     round: currentRound,
     maxRounds,
     turnSlot,
     matchOver,
     winnerId,
-    players: currentPlayers().map((p) => ({ ...p })),
+    players: maskPlayersFor(currentPlayers(), viewerId),
     lastAction,
     lastPenalized,
     pendingNationalEvent,
   };
 }
 
+// Sends a *personalized* payload to each connected client - not a single
+// shared broadcast - so each one only ever receives its own Political
+// Network/KABEL data on the wire, never another player's. The host's own
+// local view goes through the same masking via getMatchSnapshot().
 function broadcastMatchUpdate() {
-  multiplayer.send({ type: 'match-update', payload: buildBroadcastPayload() });
+  room.getConnectionsByPlayerId().forEach((conn, playerId) => {
+    multiplayer.send({ type: 'match-update', payload: buildBroadcastPayloadFor(playerId) }, conn);
+  });
   bus.emit('match:updated', getMatchSnapshot());
 }
 
@@ -212,6 +234,20 @@ function setLastAction(action) {
   lastAction = { ...action, seq: actionSeq };
 }
 
+// Once a player has `threshold` successful Projects in one category, every
+// further success in that same category re-rolls the unlock chance - never
+// resetting their progress, never punishing bad luck - until either they
+// win KABEL or someone else already has (checked first, so a claimed KABEL
+// silently stops all further rolls for the rest of the match).
+function maybeRollKabelUnlock(player, category) {
+  if (kabelClaimed) return;
+  if (player.politicalNetwork[category] < GAME_BALANCE.politicalNetwork.threshold) return;
+  if (Math.random() < GAME_BALANCE.politicalNetwork.unlockChancePercent / 100) {
+    kabelClaimed = true;
+    player.hasKabel = true;
+  }
+}
+
 function hostResolveProjek(playerId, cardId) {
   if (!isActivePlayerId(playerId)) return;
   const players = room.getPlayersLive();
@@ -219,6 +255,7 @@ function hostResolveProjek(playerId, cardId) {
   if (!player) return;
   const card = resolveProjek(player, cardId, players.length);
   if (!card) return;
+  maybeRollKabelUnlock(player, card.category);
   setLastAction({ type: 'projek', actorId: playerId, card });
   advanceTurn();
 }
@@ -257,19 +294,15 @@ function hostResolvePolitik(playerId, extraInfluence, respond) {
 }
 
 // Card-generation step for Sabotaj, mirroring requestProjekOffers/
-// requestMediaOffers - the only "random data" here is whether Kabel is
-// being offered this attempt, so that's all the response carries. The
-// roll result is remembered host-side (`kabelModeForActivePlayer`) and is
-// what the actual attempt gets resolved against - never whatever a client
-// might claim.
+// requestMediaOffers - except there's no randomness here anymore. Whether
+// this attempt gets the Kabel treatment is a pure lookup against the
+// player's own `hasKabel` flag (set by maybeRollKabelUnlock), which the
+// host is the only one ever mutating, so a client can't just claim it owns
+// one.
 function hostResolveSabotajOptions(playerId, respond) {
   if (!isActivePlayerId(playerId)) return;
-  kabelModeForActivePlayer = false;
-  if (kabelAvailable && Math.random() < KABEL_SPAWN_CHANCE) {
-    kabelModeForActivePlayer = true;
-    kabelAvailable = false; // consumed the instant it appears, whether used or not
-  }
-  respond({ type: 'sabotaj-options', payload: { isKabel: kabelModeForActivePlayer } });
+  const player = room.getPlayersLive().find((p) => p.id === playerId);
+  respond({ type: 'sabotaj-options', payload: { isKabel: Boolean(player?.hasKabel) } });
 }
 
 function hostResolveSabotaj(playerId, targetId, extraInfluence, respond) {
@@ -278,13 +311,16 @@ function hostResolveSabotaj(playerId, targetId, extraInfluence, respond) {
   const player = players.find((p) => p.id === playerId);
   const target = players.find((p) => p.id === targetId);
   if (!player) return;
-  const isKabel = kabelModeForActivePlayer;
+  const isKabel = Boolean(player.hasKabel);
   const result = resolveSabotaj(player, target, players, extraInfluence, { isKabel });
   if (!result.ok) {
     respond({ type: 'action-rejected', payload: { reason: result.reason } });
     return;
   }
-  kabelModeForActivePlayer = false;
+  // KABEL is a one-time-use card: it's spent the moment it's actually used
+  // in an attempt (win or lose), not merely offered - so backing out of the
+  // target picker or attempt modal doesn't cost the player their card.
+  if (isKabel) player.hasKabel = false;
   setLastAction({
     type: 'sabotaj',
     actorId: playerId,
@@ -441,8 +477,7 @@ bus.on('room:match-started', () => {
   matchStarted = true;
   matchOver = false;
   winnerId = null;
-  kabelAvailable = true;
-  kabelModeForActivePlayer = false;
+  kabelClaimed = false;
   pendingNationalEvent = null;
 
   const roomSnap = room.getRoomSnapshot();
@@ -483,7 +518,6 @@ export function resetMatch() {
   matchOver = false;
   winnerId = null;
   clientPlayers = [];
-  kabelAvailable = true;
-  kabelModeForActivePlayer = false;
+  kabelClaimed = false;
   pendingNationalEvent = null;
 }
