@@ -89,9 +89,12 @@ export const GAME_BALANCE = {
   // category opens a chance to unlock KABEL, re-rolled on every further
   // successful Project in that category until either this player wins it
   // or someone else already has (see match.js's maybeRollKabelUnlock).
+  // TEMPORARY test values - lower threshold + guaranteed roll so KABEL
+  // unlocks on the very first successful Project, for quick testing.
+  // Revert to threshold: 3, unlockChancePercent: 30 for real play.
   politicalNetwork: {
-    threshold: 3,
-    unlockChancePercent: 30,
+    threshold: 1,
+    unlockChancePercent: 100,
   },
 
   nationalEvents: {
