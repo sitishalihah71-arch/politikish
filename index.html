@@ -164,6 +164,12 @@
               <span class="switch-knob"></span>
             </button>
           </div>
+          <div class="setting-row">
+            <label for="setting-lobby-parliament">Parliament Voting</label>
+            <button id="setting-lobby-parliament" class="switch" type="button" role="switch" aria-checked="true">
+              <span class="switch-knob"></span>
+            </button>
+          </div>
         </div>
         <p id="lobby-start-hint" class="room-status">Waiting for all players to be ready&hellip;</p>
         <button id="btn-lobby-start" class="menu-btn menu-btn-primary" type="button" disabled>
@@ -256,6 +262,14 @@
         </div>
 
         <p class="scandal-warning">Jika skandal capai 100%: Hilang 50% duit, turun 1 pangkat, skandal reset ke 30%.</p>
+
+        <div class="approval-meter">
+          <div class="approval-meter-header">
+            <h4>KADAR PERSETUJUAN</h4>
+            <span id="match-approval-pct">50%</span>
+          </div>
+          <div class="approval-bar"><div class="approval-bar-fill" id="approval-bar-fill"></div></div>
+        </div>
 
         <div class="political-network">
           <h4>RANGKAIAN POLITIK</h4>
@@ -361,6 +375,24 @@
       <button id="btn-news-continue" class="menu-btn menu-btn-primary" type="button">
         <span class="menu-btn-label">Continue</span>
       </button>
+    </div>
+  </div>
+
+  <div id="parliament-overlay" class="modal-overlay parliament-overlay" hidden>
+    <div class="modal-card parliament-card" role="dialog" aria-modal="true">
+      <div class="parliament-icon">🏛️</div>
+      <h2 class="parliament-title">PARLIAMENT VOTING</h2>
+      <p id="parliament-motion-name" class="parliament-motion-name"></p>
+      <p id="parliament-motion-description" class="parliament-motion-description"></p>
+      <div id="parliament-countdown" class="parliament-countdown">90s</div>
+      <div class="parliament-actions">
+        <button id="btn-vote-no" class="menu-btn menu-btn-secondary" type="button">
+          <span class="menu-btn-label">No</span>
+        </button>
+        <button id="btn-vote-yes" class="menu-btn menu-btn-primary" type="button">
+          <span class="menu-btn-label">Yes</span>
+        </button>
+      </div>
     </div>
   </div>
 

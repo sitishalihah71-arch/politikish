@@ -7,7 +7,7 @@
 // same cost/chance math, resolution (rank swap), and confirmation dialog.
 
 import { RANKS, getNextRank } from './player.js';
-import { applyScandalDelta, hasOpenSeat } from './effects.js';
+import { applyScandalDelta, applyApprovalDelta, hasOpenSeat } from './effects.js';
 import { hasAsset } from './politicalOpportunities.js';
 import { GAME_BALANCE } from './balance.js';
 
@@ -126,6 +126,7 @@ export function resolveSabotaj(attacker, target, players, extraInfluence, option
     target.rank = attackerOldRank;
     attacker.stats.sabotagesSucceeded += 1;
     applyScandalDelta(attacker, -15);
+    applyApprovalDelta(target, -GAME_BALANCE.approvalRating.seatLostPenalty);
   } else {
     applyScandalDelta(attacker, 15);
   }

@@ -55,6 +55,9 @@ export function initMatchState(player) {
   player.scandal = STARTING_SCANDAL;
   player.rank = 'ahli';
   player.publicSupportTurns = 0;
+  // Approval Rating: a second, purely-informational public-standing meter
+  // (see balance.js's `approvalRating` comment for its one actual job).
+  player.approval = 50;
   player.stats = {
     projectsCompleted: 0,
     promotionsSucceeded: 0,

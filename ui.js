@@ -297,6 +297,7 @@ function renderLobby(snapshot) {
     $('#setting-lobby-players').value = String(snapshot.settings.maxPlayers);
     $('#setting-lobby-rounds').value = String(snapshot.settings.rounds);
     $('#setting-lobby-events').setAttribute('aria-checked', String(snapshot.settings.nationalEvents));
+    $('#setting-lobby-parliament').setAttribute('aria-checked', String(snapshot.settings.parliamentVoting));
 
     const canStart = room.canStartMatch();
     const startBtn = $('#btn-lobby-start');
@@ -349,6 +350,11 @@ function wireLobbyScreen() {
     const current = $('#setting-lobby-events').getAttribute('aria-checked') === 'true';
     room.updateSettings({ nationalEvents: !current });
   });
+
+  $('#setting-lobby-parliament').addEventListener('click', () => {
+    const current = $('#setting-lobby-parliament').getAttribute('aria-checked') === 'true';
+    room.updateSettings({ parliamentVoting: !current });
+  });
 }
 
 function wireRoomEvents() {
@@ -390,6 +396,8 @@ let hasEnteredMatchScreen = false;
 let hasEnteredMatchEndScreen = false;
 let lastHandledActionSeq = -1;
 let lastSeenEventSeq = -1;
+let lastSeenVoteSeq = -1;
+let voteCountdownInterval = null;
 let wasMyTurn = false;
 let currentAttempt = null; // { kind: 'politik' | 'sabotaj' | 'raid', targetId, assetId }
 let currentDealTargetId = null;
@@ -437,7 +445,7 @@ function renderMatchPlayerList(snapshot) {
       const stats = document.createElement('div');
       stats.className = 'player-card-stats';
       const scandalClass = player.scandal >= 60 ? ' stat-scandal-warn' : '';
-      stats.innerHTML = `<span>${formatMoney(player.money)}</span><span>${player.influence} Inf</span><span class="${scandalClass}">${player.scandal}%</span>`;
+      stats.innerHTML = `<span>${formatMoney(player.money)}</span><span>${player.influence} Inf</span><span class="${scandalClass}">${player.scandal}%</span><span>👍${player.approval}%</span>`;
       info.appendChild(stats);
 
       card.appendChild(info);
@@ -527,14 +535,19 @@ function renderActionPanel(snapshot) {
   if (activePlayer) appendPublicSupportBadge(turnNameEl, activePlayer);
 
   const isPresident = localPlayer && localPlayer.rank === 'president';
+  // A pending vote pauses every turn-gated action host-side (see match.js's
+  // isActivePlayerId) even for the player whose turn is technically queued
+  // up next - the buttons must reflect that or they'd look clickable while
+  // silently doing nothing.
+  const votingOpen = Boolean(snapshot.pendingVote);
 
-  $('#btn-action-projek').disabled = !isMyTurn;
-  $('#btn-action-politik').disabled = !isMyTurn || isPresident;
-  $('#btn-action-sabotaj').disabled = !isMyTurn || isPresident;
-  $('#btn-action-media').disabled = !isMyTurn;
+  $('#btn-action-projek').disabled = !isMyTurn || votingOpen;
+  $('#btn-action-politik').disabled = !isMyTurn || isPresident || votingOpen;
+  $('#btn-action-sabotaj').disabled = !isMyTurn || isPresident || votingOpen;
+  $('#btn-action-media').disabled = !isMyTurn || votingOpen;
   // Raid isn't tied to rank progression the way Sabotaj/Politik are, so
   // it's available to a President too - only turn-gated.
-  $('#btn-action-raid').disabled = !isMyTurn;
+  $('#btn-action-raid').disabled = !isMyTurn || votingOpen;
 
   const skipBtn = $('#btn-host-skip');
   skipBtn.hidden = !snapshot.isHost;
@@ -546,6 +559,10 @@ function renderActionPanel(snapshot) {
     const pct = localPlayer.scandal;
     $('#match-scandal-pct').textContent = `${pct}%`;
     $('#scandal-bar-fill').style.width = `${100 - pct}%`;
+
+    const approvalPct = localPlayer.approval;
+    $('#match-approval-pct').textContent = `${approvalPct}%`;
+    $('#approval-bar-fill').style.width = `${approvalPct}%`;
   }
 
   renderPoliticalNetwork(localPlayer);
@@ -1130,10 +1147,41 @@ function showNewsOverlay(pending) {
   sound.playWarning();
 }
 
+// Parliament Voting pauses every client at once, not just the active
+// player - the overlay shows on every screen the moment `pendingVote`
+// appears, with a live countdown ticking down to the host's deadline.
+// Voting hides *this client's* overlay immediately (already did their
+// part); the overlay only reappears for the next session's seq, or the
+// result arrives through the normal News overlay once the host resolves it.
+function showParliamentOverlay(pendingVote) {
+  if (!pendingVote) {
+    $('#parliament-overlay').hidden = true;
+    clearInterval(voteCountdownInterval);
+    voteCountdownInterval = null;
+    return;
+  }
+  if (pendingVote.seq === lastSeenVoteSeq) return;
+  lastSeenVoteSeq = pendingVote.seq;
+
+  $('#parliament-motion-name').textContent = pendingVote.name;
+  $('#parliament-motion-description').textContent = pendingVote.description;
+  $('#parliament-overlay').hidden = false;
+  sound.playWarning();
+
+  const tick = () => {
+    const remaining = Math.max(0, Math.ceil((pendingVote.deadline - Date.now()) / 1000));
+    $('#parliament-countdown').textContent = `${remaining}s`;
+  };
+  clearInterval(voteCountdownInterval);
+  tick();
+  voteCountdownInterval = setInterval(tick, 1000);
+}
+
 function renderMatchScreen(snapshot) {
   if (!snapshot.started) return;
 
   showNewsOverlay(snapshot.pendingNews);
+  showParliamentOverlay(snapshot.pendingVote);
 
   if (snapshot.matchOver) {
     if (!hasEnteredMatchEndScreen) {
@@ -1277,6 +1325,9 @@ function wireMatchActions() {
     hasEnteredMatchEndScreen = false;
     lastHandledActionSeq = -1;
     lastSeenEventSeq = -1;
+    lastSeenVoteSeq = -1;
+    clearInterval(voteCountdownInterval);
+    voteCountdownInterval = null;
     wasMyTurn = false;
     hadKabel = false;
     showScreen('main-menu');
@@ -1285,6 +1336,22 @@ function wireMatchActions() {
   $('#btn-news-continue').addEventListener('click', () => {
     sound.playClick();
     $('#news-overlay').hidden = true;
+  });
+
+  $('#btn-vote-yes').addEventListener('click', () => {
+    sound.playClick();
+    match.castVote('yes');
+    $('#parliament-overlay').hidden = true;
+    clearInterval(voteCountdownInterval);
+    voteCountdownInterval = null;
+  });
+
+  $('#btn-vote-no').addEventListener('click', () => {
+    sound.playClick();
+    match.castVote('no');
+    $('#parliament-overlay').hidden = true;
+    clearInterval(voteCountdownInterval);
+    voteCountdownInterval = null;
   });
 }
 

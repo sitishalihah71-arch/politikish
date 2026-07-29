@@ -25,6 +25,7 @@ import { resolveSabotaj } from './sabotage.js';
 import { pickNationalEvent, applyNationalEvent } from './events.js';
 import { dealStartingAssets, hasAsset, resolveRaid } from './politicalOpportunities.js';
 import { proposeDeal, respondToDeal, resetDeals } from './backroomDeals.js';
+import { PARLIAMENT_MOTIONS, pickMotion, applyMotion } from './parliament.js';
 import { GAME_BALANCE } from './balance.js';
 
 let matchStarted = false;
@@ -61,6 +62,17 @@ function postNews({ icon, headline, description }) {
   newsSeq += 1;
   pendingNews = { icon, headline, description, seq: newsSeq };
 }
+
+// Parliament Voting: while `pendingVote` is set, every turn-gated action is
+// blocked (see isActivePlayerId below) - the whole table pauses for this,
+// unlike every other mechanic in the game which only ever gates one actor.
+// `votes` is playerId -> 'yes'|'no'; anyone not in it by resolution time
+// (including a disconnected player) counts as a "no". `voteTimer` is the
+// host-side force-resolve clock; a vote also resolves early the moment
+// every currently-connected player has cast one.
+let pendingVote = null;
+let voteSeq = 0;
+let voteTimer = null;
 
 function isHostRole() {
   return room.getRoomSnapshot().isHost;
@@ -106,6 +118,7 @@ export function getMatchSnapshot() {
     lastAction,
     lastPenalized,
     pendingNews,
+    pendingVote,
   };
 }
 
@@ -120,6 +133,7 @@ function buildBroadcastPayloadFor(viewerId) {
     lastAction,
     lastPenalized,
     pendingNews,
+    pendingVote,
   };
 }
 
@@ -166,6 +180,96 @@ function maybeTriggerNationalEvent(completedRound, players) {
   const event = pickNationalEvent();
   players.forEach((p) => applyNationalEvent(event, p));
   postNews({ icon: event.icon, headline: event.name, description: event.description });
+}
+
+// Fires at the same round-boundary checkpoint as National Events, on its
+// own independent interval - checked *after* the maxRounds/endMatch check
+// in advanceTurn() so a session never opens on the match's last round with
+// no next turn left to resume into. Opens a full-table vote instead of
+// resolving instantly: `pendingVote` blocks every turn-gated action (see
+// isActivePlayerId) until hostCastVote/resolveVote closes it out.
+function maybeTriggerParliamentSession(completedRound, players) {
+  if (completedRound === null) return;
+  if (!room.getRoomSnapshot().settings.parliamentVoting) return;
+  if (completedRound % GAME_BALANCE.parliament.intervalRounds !== 0) return;
+
+  const { motion, target } = pickMotion(players);
+  const description = motion.type === 'no-confidence'
+    ? motion.description.replace('{target}', target.name)
+    : motion.description;
+
+  voteSeq += 1;
+  pendingVote = {
+    seq: voteSeq,
+    motionId: motion.id,
+    name: motion.name,
+    description,
+    targetId: target ? target.id : null,
+    deadline: Date.now() + GAME_BALANCE.parliament.voteDurationMs,
+    votes: {},
+  };
+  clearTimeout(voteTimer);
+  voteTimer = setTimeout(resolveVote, GAME_BALANCE.parliament.voteDurationMs);
+}
+
+// Any connected player can cast a vote while one is open - not gated by
+// whose turn it is, same precedent as Backroom Deals. Resolves immediately
+// once every currently-connected player has voted, instead of waiting out
+// the full timer; a player who disconnects mid-vote simply drops out of
+// that "everyone" check rather than blocking resolution.
+function hostCastVote(playerId, choice) {
+  if (!pendingVote) return;
+  const players = room.getPlayersLive();
+  const player = players.find((p) => p.id === playerId);
+  if (!player || !player.connected) return;
+
+  pendingVote.votes[playerId] = choice === 'yes' ? 'yes' : 'no';
+
+  const stillWaiting = players.some((p) => p.connected && !pendingVote.votes[p.id]);
+  if (!stillWaiting) resolveVote();
+}
+
+// Tallies yes vs no - anyone without a recorded vote (never voted, or
+// disconnected before casting one) counts as a "no", so a silent table
+// never accidentally passes a motion. Applies the motion only if it
+// passed, posts the result through the same News surface every other
+// announcement in this game already uses, then clears pendingVote so the
+// turn that was already computed underneath becomes interactive again.
+function resolveVote() {
+  if (!pendingVote) return;
+  clearTimeout(voteTimer);
+  voteTimer = null;
+
+  const vote = pendingVote;
+  const players = room.getPlayersLive();
+  const yesCount = players.filter((p) => vote.votes[p.id] === 'yes').length;
+  const noCount = players.length - yesCount;
+  const passed = yesCount > noCount;
+
+  const motion = PARLIAMENT_MOTIONS.find((m) => m.id === vote.motionId);
+  const target = vote.targetId ? players.find((p) => p.id === vote.targetId) : null;
+  if (passed) applyMotion(motion, target, players);
+
+  pendingVote = null;
+
+  const outcomeNote = motion.type === 'no-confidence' && passed ? ` ${target?.name} is demoted to Ahli Biasa.` : '';
+  postNews({
+    icon: '🏛️',
+    headline: passed ? 'MOTION PASSED' : 'MOTION FAILED',
+    description: `${vote.name} — ${passed ? 'Passed' : 'Failed'} (${yesCount} Yes, ${noCount} No). ${vote.description}${outcomeNote}`,
+  });
+  // Clears pendingVote above already ran; now settle whatever the turn
+  // state underneath actually is. If the player now up disconnected while
+  // the vote was blocking everything (the one path that could have skipped
+  // them was itself suppressed for the same reason - see the room:updated
+  // handler below), route through advanceTurn() so its own guard loop skips
+  // them properly instead of broadcasting a turn nobody can take.
+  const newActive = getActivePlayer(room.getPlayersLive());
+  if (newActive && !newActive.connected) {
+    advanceTurn();
+  } else {
+    settleTurnState();
+  }
 }
 
 // Media Empire pays out once per completed round, to every owner - not tied
@@ -238,17 +342,29 @@ function advanceTurn({ skipSupportTick = false } = {}) {
     return;
   }
 
-  // A bribery leak benches both parties for their next turn (see
-  // backroomDeals.js). Auto-resolve it the moment their turn comes up,
-  // exactly like the manual host skip - they still "take" the turn (a
-  // visible skip notification fires) rather than being silently passed
-  // over the way a disconnected player is. Broadcast before recursing so
-  // that when a leak benches two players in a row, both skips reach every
-  // client instead of the second overwriting the first's lastAction. The
-  // recursive call is deferred a beat so the host's own screen - which
-  // renders synchronously off this same call stack - actually paints each
-  // skip toast instead of collapsing them all into the final one.
-  const newActive = players.find((p) => p.slot === turnSlot);
+  maybeTriggerParliamentSession(completedRound, players);
+  settleTurnState();
+}
+
+// Broadcasts the now-current turn state - unless a Parliament vote just
+// opened (in which case that alone is broadcast, and this same check runs
+// again once the vote resolves - see resolveVote), or the player now up has
+// a leftover bribery-leak skip flag from backroomDeals.js, auto-resolved
+// the moment their turn comes up exactly like the manual host skip: they
+// still "take" the turn (a visible skip notification fires) rather than
+// being silently passed over the way a disconnected player is. Broadcast
+// before recursing so that when a leak benches two players in a row, both
+// skips reach every client instead of the second overwriting the first's
+// lastAction. The recursive call is deferred a beat so the host's own
+// screen - which renders synchronously off this same call stack - actually
+// paints each skip toast instead of collapsing them all into the final one.
+function settleTurnState() {
+  if (pendingVote) {
+    broadcastMatchUpdate();
+    return;
+  }
+
+  const newActive = getActivePlayer(room.getPlayersLive());
   if (newActive && newActive.skipNextTurn) {
     newActive.skipNextTurn = false;
     setLastAction({ type: 'skip', actorId: newActive.id, reason: 'bribery-leak' });
@@ -260,7 +376,11 @@ function advanceTurn({ skipSupportTick = false } = {}) {
   broadcastMatchUpdate();
 }
 
+// A pending vote pauses every turn-gated action for the whole table, not
+// just the active player - so this returns false for everyone while
+// `pendingVote` is set, exactly as if nobody's turn was active.
 function isActivePlayerId(playerId) {
+  if (pendingVote) return false;
   const active = getActivePlayer(room.getPlayersLive());
   return active && active.id === playerId;
 }
@@ -492,6 +612,9 @@ function handleHostMatchMessage(type, payload, conn) {
     hostProposeDeal(conn.peer, payload?.targetId, payload?.money || 0, payload?.influence || 0, respond);
   } else if (type === 'deal-respond') {
     hostRespondToDeal(conn.peer, payload?.dealId, Boolean(payload?.accept));
+  } else if (type === 'vote-cast') {
+    // Not turn-gated - any connected player votes while pendingVote is open.
+    hostCastVote(conn.peer, payload?.choice);
   }
 }
 
@@ -512,6 +635,7 @@ function handleClientMatchMessage(type, payload) {
     lastAction = payload.lastAction;
     lastPenalized = payload.lastPenalized || [];
     pendingNews = payload.pendingNews || null;
+    pendingVote = payload.pendingVote || null;
     bus.emit('match:updated', getMatchSnapshot());
   } else if (type === 'projek-offers') {
     bus.emit('match:offers', { action: 'projek', offers: payload.offers });
@@ -625,6 +749,16 @@ export function respondToBackroomDeal(dealId, accept) {
   }
 }
 
+// Parliament Voting is never turn-gated - any connected player can vote
+// while pendingVote is open.
+export function castVote(choice) {
+  if (isHostRole()) {
+    hostCastVote(room.getRoomSnapshot().localPlayerId, choice);
+  } else {
+    multiplayer.send({ type: 'vote-cast', payload: { choice } });
+  }
+}
+
 // Host-only manual override: forces the current player's turn to end with
 // no resolution (no cost, no resource change) - for a player who's still
 // connected but has stepped away, which the automatic disconnect-skip in
@@ -645,6 +779,9 @@ bus.on('room:match-started', () => {
   winnerId = null;
   kabelClaimed = false;
   pendingNews = null;
+  pendingVote = null;
+  clearTimeout(voteTimer);
+  voteTimer = null;
   resetDeals();
 
   const roomSnap = room.getRoomSnapshot();
@@ -667,11 +804,15 @@ bus.on('room:match-started', () => {
 // Keep the match in sync with room-level connection changes (disconnect,
 // reconnect) - auto-skip the active player's turn if they just dropped, or
 // simply re-broadcast so everyone's "reconnecting..." state stays current.
+// While a vote is open, never advance the turn here even if the queued-up
+// active player just disconnected - that would silently shift turnSlot out
+// from under the still-pending vote. resolveVote() re-checks this itself
+// once the vote actually closes, so it's caught there instead.
 bus.on('room:updated', () => {
   if (!matchStarted || matchOver || !isHostRole()) return;
   const players = room.getPlayersLive();
   const active = getActivePlayer(players);
-  if (active && !active.connected) {
+  if (active && !active.connected && !pendingVote) {
     advanceTurn();
   } else {
     broadcastMatchUpdate();
@@ -688,5 +829,8 @@ export function resetMatch() {
   clientPlayers = [];
   kabelClaimed = false;
   pendingNews = null;
+  pendingVote = null;
+  clearTimeout(voteTimer);
+  voteTimer = null;
   resetDeals();
 }

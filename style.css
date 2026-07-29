@@ -741,6 +741,67 @@ button {
   flex: 1;
 }
 
+/* Parliament Voting is the one mechanic that pauses every client at once,
+   not just one actor - it sits above the News overlay's z-index since a
+   vote's result is itself announced through News right after this closes. */
+.parliament-overlay {
+  z-index: 220;
+  background: rgba(4, 6, 10, 0.85);
+}
+
+.parliament-card {
+  width: min(360px, calc(100vw - 32px));
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 10px;
+  padding: 28px 24px;
+  border-color: var(--gold-dim);
+}
+
+.parliament-icon {
+  font-size: 40px;
+  line-height: 1;
+}
+
+.parliament-title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 800;
+  letter-spacing: 1px;
+  color: var(--gold);
+}
+
+.parliament-motion-name {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 700;
+}
+
+.parliament-motion-description {
+  margin: 0;
+  font-size: 14px;
+  color: var(--text-secondary);
+}
+
+.parliament-countdown {
+  font-size: 22px;
+  font-weight: 800;
+  color: var(--red);
+}
+
+.parliament-actions {
+  display: flex;
+  gap: 10px;
+  width: 100%;
+  margin-top: 8px;
+}
+
+.parliament-actions .menu-btn {
+  flex: 1;
+}
+
 .backroom-deal-btn {
   width: 100%;
   padding: 10px 14px;
@@ -1225,6 +1286,51 @@ button {
   border-radius: var(--radius-sm);
   padding: 10px 12px;
   line-height: 1.4;
+}
+
+/* Approval Rating - a second public-standing meter alongside Scandal, but
+   simpler: a plain 0-100 fill with no zone labels, since nothing special
+   triggers at a threshold this phase. */
+.approval-meter {
+  background: var(--bg-panel);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  padding: 12px;
+}
+
+.approval-meter-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.approval-meter-header h4 {
+  margin: 0;
+  font-size: 11px;
+  letter-spacing: 1px;
+  color: var(--text-secondary);
+}
+
+.approval-meter-header span {
+  font-weight: 800;
+  font-size: 14px;
+}
+
+.approval-bar {
+  height: 10px;
+  border-radius: 999px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  position: relative;
+  overflow: hidden;
+}
+
+.approval-bar-fill {
+  height: 100%;
+  width: 50%;
+  background: linear-gradient(90deg, var(--purple), var(--green));
+  transition: width 0.4s ease;
 }
 
 /* Private to the local player only - never populated with another

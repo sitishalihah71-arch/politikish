@@ -2,7 +2,7 @@
 // player's *current* rank (the rank being promoted from).
 
 import { getNextRank } from './player.js';
-import { applyScandalDelta, hasOpenSeat } from './effects.js';
+import { applyScandalDelta, applyApprovalDelta, hasOpenSeat } from './effects.js';
 import { hasAsset } from './politicalOpportunities.js';
 import { GAME_BALANCE } from './balance.js';
 
@@ -59,6 +59,7 @@ export function resolvePolitik(player, players, extraInfluence, rng = Math.rando
     player.rank = toRank;
     player.stats.promotionsSucceeded += 1;
     applyScandalDelta(player, -15);
+    applyApprovalDelta(player, GAME_BALANCE.approvalRating.politikSuccessGain);
   }
 
   return { ok: true, success, chance, cost, toRank };

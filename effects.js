@@ -17,6 +17,12 @@ export function getScandalStatus(scandal) {
   return 'Bersih';
 }
 
+// Approval Rating has no interactions to account for (unlike Scandal's
+// Public Support reduction) - just a plain clamp.
+export function applyApprovalDelta(player, delta) {
+  player.approval = clamp(player.approval + delta, 0, 100);
+}
+
 // Positive delta = incoming scandal (reduced by active Public Support).
 // Negative delta = a reduction, applied directly with no interaction.
 export function applyScandalDelta(player, delta) {
@@ -44,6 +50,7 @@ export function applyScandalPenalty(player, players) {
 
   player.money = Math.floor(player.money * (1 - SCANDAL_MONEY_LOSS_PERCENT / 100));
   player.scandal = SCANDAL_PENALTY_RESET;
+  applyApprovalDelta(player, -GAME_BALANCE.approvalRating.scandalPenaltyPenalty);
 
   const index = RANKS.indexOf(player.rank);
   if (index > 0) {

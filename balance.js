@@ -41,6 +41,7 @@ export const GAME_BALANCE = {
     roundOptions: [10, 20, 30, 40, 50],
     defaultRounds: 10,
     defaultNationalEvents: true,
+    defaultParliamentVoting: true,
   },
 
   // Seat capacity per rank is derived from the live player count (N) as
@@ -133,5 +134,29 @@ export const GAME_BALANCE = {
     leakScandalWeightPercent: 60,
     leakMaxChance: 90,
     skipTurnsOnLeak: 1,
+  },
+
+  // Approval Rating is a second public-standing meter alongside Scandal
+  // (0-100, starts neutral at 50). It has no mechanical effect of its own
+  // this phase beyond tracking who's popular - its one job is deciding who
+  // is eligible to be targeted by a Vote of No Confidence motion (see
+  // `parliament`). Deltas are applied inline by the same resolve functions
+  // that already produce these outcomes (resolveProjek/resolvePolitik/
+  // resolveMedia/resolveSabotaj/applyScandalPenalty).
+  approvalRating: {
+    projekGain: 3,
+    politikSuccessGain: 8,
+    kempenImejGain: 5,
+    seatLostPenalty: 10,
+    scandalPenaltyPenalty: 15,
+  },
+
+  // Parliament Voting: a full-table pause every `intervalRounds` (checked
+  // at the same round-boundary checkpoint as National Events, on its own
+  // independent cadence). The motion pool itself lives in parliament.js
+  // (same split as National Events: cadence here, content there).
+  parliament: {
+    intervalRounds: 7,
+    voteDurationMs: 90000,
   },
 };

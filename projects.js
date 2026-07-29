@@ -6,7 +6,7 @@
 // tiers by extending GAME_BALANCE.projects.cards, not this file.
 
 import { pickRandomUnique } from './utils.js';
-import { applyScandalDelta } from './effects.js';
+import { applyScandalDelta, applyApprovalDelta } from './effects.js';
 import { getEconomyScale } from './player.js';
 import { hasAsset } from './politicalOpportunities.js';
 import { GAME_BALANCE } from './balance.js';
@@ -40,6 +40,7 @@ export function resolveProjek(player, cardId, playerCount) {
   player.money += Math.round(card.money * scale * sponsorBonus);
   player.influence += Math.round(card.influence * scale);
   applyScandalDelta(player, card.scandal);
+  applyApprovalDelta(player, GAME_BALANCE.approvalRating.projekGain);
   player.stats.projectsCompleted += 1;
   player.politicalNetwork[card.category] += 1;
   return card;

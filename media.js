@@ -3,7 +3,8 @@
 // affects a chosen target ('target'). Add new cards here to extend the pool.
 
 import { pickRandomUnique } from './utils.js';
-import { applyScandalDelta } from './effects.js';
+import { applyScandalDelta, applyApprovalDelta } from './effects.js';
+import { GAME_BALANCE } from './balance.js';
 
 export const MEDIA_CARDS = [
   { id: 'sidang-media', name: 'Sidang Media', kind: 'direct', cost: 15000, scandalDelta: -10, supportTurns: 2 },
@@ -40,6 +41,7 @@ export function resolveMedia(player, cardId, targetPlayer, rng = Math.random) {
   const { card } = validation;
   player.money -= card.cost;
   player.stats.mediaCardsUsed += 1;
+  applyApprovalDelta(player, GAME_BALANCE.approvalRating.kempenImejGain);
 
   let success = true;
   if (card.kind === 'direct') {
