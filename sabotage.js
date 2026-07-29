@@ -8,9 +8,11 @@
 
 import { RANKS, getNextRank } from './player.js';
 import { applyScandalDelta, hasOpenSeat } from './effects.js';
+import { hasAsset } from './politicalOpportunities.js';
 import { GAME_BALANCE } from './balance.js';
 
 const { sabotage: cfg, kabel: kabelCfg } = GAME_BALANCE;
+const ROYAL_CONNECTION_PENALTY = GAME_BALANCE.politicalOpportunity.assets.royalConnection.sabotageDefensePercent / 100;
 
 export const SABOTAGE_TABLE = {
   ahli: { baseCost: cfg.ahli.cost, baseChance: cfg.ahli.chance / 100 },
@@ -35,37 +37,40 @@ export const KABEL_TABLE = {
 export const KABEL_COST = kabelCfg.cost;
 
 // Shared by both normal Sabotaj and Kabel - only the base chance differs.
-function computeChanceBreakdown(baseChance, extraInfluence, targetHasPublicSupport) {
+// Public Support and Royal Connection stack as two independent penalties -
+// a well-defended target can hold both at once.
+function computeChanceBreakdown(baseChance, extraInfluence, targetHasPublicSupport, targetHasRoyalConnection) {
   const steps = Math.floor(Math.max(extraInfluence, 0) / SABOTAGE_EXTRA_STEP);
   const preCap = baseChance + steps * SABOTAGE_EXTRA_BONUS;
   const capped = Math.min(preCap, SABOTAGE_MAX_CHANCE);
   const extraBonus = capped - baseChance;
-  const penalty = targetHasPublicSupport ? PUBLIC_SUPPORT_PENALTY : 0;
-  const final = Math.max(capped - penalty, SABOTAGE_MIN_CHANCE);
-  return { base: baseChance, extraBonus, publicSupportPenalty: penalty, final };
+  const publicSupportPenalty = targetHasPublicSupport ? PUBLIC_SUPPORT_PENALTY : 0;
+  const royalConnectionPenalty = targetHasRoyalConnection ? ROYAL_CONNECTION_PENALTY : 0;
+  const final = Math.max(capped - publicSupportPenalty - royalConnectionPenalty, SABOTAGE_MIN_CHANCE);
+  return { base: baseChance, extraBonus, publicSupportPenalty, royalConnectionPenalty, final };
 }
 
 // Breaks the final chance down into its contributing components, so the UI
-// can render the same "Base / Extra Influence / Public Support / Final"
-// calculation shown to the player before they confirm the attack.
-export function describeSabotajChance(fromRank, extraInfluence, targetHasPublicSupport) {
+// can render the same "Base / Extra Influence / Public Support / Royal
+// Connection / Final" calculation shown to the player before they confirm.
+export function describeSabotajChance(fromRank, extraInfluence, targetHasPublicSupport, targetHasRoyalConnection) {
   const config = SABOTAGE_TABLE[fromRank];
-  if (!config) return { base: 0, extraBonus: 0, publicSupportPenalty: 0, final: 0 };
-  return computeChanceBreakdown(config.baseChance, extraInfluence, targetHasPublicSupport);
+  if (!config) return { base: 0, extraBonus: 0, publicSupportPenalty: 0, royalConnectionPenalty: 0, final: 0 };
+  return computeChanceBreakdown(config.baseChance, extraInfluence, targetHasPublicSupport, targetHasRoyalConnection);
 }
 
-export function describeKabelChance(targetRank, extraInfluence, targetHasPublicSupport) {
+export function describeKabelChance(targetRank, extraInfluence, targetHasPublicSupport, targetHasRoyalConnection) {
   const config = KABEL_TABLE[targetRank];
-  if (!config) return { base: 0, extraBonus: 0, publicSupportPenalty: 0, final: 0 };
-  return computeChanceBreakdown(config.chance, extraInfluence, targetHasPublicSupport);
+  if (!config) return { base: 0, extraBonus: 0, publicSupportPenalty: 0, royalConnectionPenalty: 0, final: 0 };
+  return computeChanceBreakdown(config.chance, extraInfluence, targetHasPublicSupport, targetHasRoyalConnection);
 }
 
-export function calculateSabotajChance(fromRank, extraInfluence, targetHasPublicSupport = false) {
-  return describeSabotajChance(fromRank, extraInfluence, targetHasPublicSupport).final;
+export function calculateSabotajChance(fromRank, extraInfluence, targetHasPublicSupport = false, targetHasRoyalConnection = false) {
+  return describeSabotajChance(fromRank, extraInfluence, targetHasPublicSupport, targetHasRoyalConnection).final;
 }
 
-export function calculateKabelChance(targetRank, extraInfluence, targetHasPublicSupport = false) {
-  return describeKabelChance(targetRank, extraInfluence, targetHasPublicSupport).final;
+export function calculateKabelChance(targetRank, extraInfluence, targetHasPublicSupport = false, targetHasRoyalConnection = false) {
+  return describeKabelChance(targetRank, extraInfluence, targetHasPublicSupport, targetHasRoyalConnection).final;
 }
 
 export function getSabotajCost(fromRank, extraInfluence) {
@@ -108,9 +113,10 @@ export function resolveSabotaj(attacker, target, players, extraInfluence, option
 
   const { toRank, cost, isKabel } = validation;
   const targetHasPublicSupport = target.publicSupportTurns > 0;
+  const targetHasRoyalConnection = hasAsset(target, 'royalConnection');
   const chance = isKabel
-    ? calculateKabelChance(target.rank, extraInfluence, targetHasPublicSupport)
-    : calculateSabotajChance(attacker.rank, extraInfluence, targetHasPublicSupport);
+    ? calculateKabelChance(target.rank, extraInfluence, targetHasPublicSupport, targetHasRoyalConnection)
+    : calculateSabotajChance(attacker.rank, extraInfluence, targetHasPublicSupport, targetHasRoyalConnection);
   attacker.influence -= cost;
 
   const success = rng() < chance;

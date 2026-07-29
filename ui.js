@@ -10,6 +10,7 @@ import { RANKS, RANK_LABELS, getSeatCapacity, getNextRank } from './player.js';
 import { hasOpenSeat } from './effects.js';
 import * as politics from './politics.js';
 import * as sabotage from './sabotage.js';
+import * as opportunities from './politicalOpportunities.js';
 import { GAME_BALANCE } from './balance.js';
 
 let settings = loadSettings();
@@ -379,8 +380,10 @@ const ACTION_REJECT_MESSAGES = {
   'seat-full': 'Use Sabotaj to rebut the seat.',
   'seat-not-full': 'The seat is not full — use Politik instead.',
   'invalid-target': 'Choose a valid target.',
+  'invalid-amount': 'Offer at least some Money or Influence.',
   'insufficient-influence': 'Not enough Influence.',
   'insufficient-money': 'Not enough Money.',
+  'insufficient-funds': 'You no longer have enough to make that offer.',
 };
 
 let hasEnteredMatchScreen = false;
@@ -388,7 +391,9 @@ let hasEnteredMatchEndScreen = false;
 let lastHandledActionSeq = -1;
 let lastSeenEventSeq = -1;
 let wasMyTurn = false;
-let currentAttempt = null; // { kind: 'politik' | 'sabotaj', targetId }
+let currentAttempt = null; // { kind: 'politik' | 'sabotaj' | 'raid', targetId, assetId }
+let currentDealTargetId = null;
+let currentIncomingDeal = null; // { dealId, fromId, fromName, money, influence }
 
 function makeCardLine(text, positive) {
   const div = document.createElement('div');
@@ -426,6 +431,7 @@ function renderMatchPlayerList(snapshot) {
       name.className = 'player-card-name';
       name.textContent = player.name;
       appendPublicSupportBadge(name, player);
+      appendAssetBadges(name, player);
       info.appendChild(name);
 
       const stats = document.createElement('div');
@@ -481,6 +487,10 @@ function renderHierarchy(snapshot) {
         nameLabel.innerHTML = '&nbsp;';
       }
 
+      // Asset badges are inline (a player can own several, so they can't
+      // share the shield badge's single absolutely-positioned corner spot).
+      if (player) appendAssetBadges(nameLabel, player);
+
       wrap.appendChild(seat);
       wrap.appendChild(nameLabel);
       // Anchored to `wrap` (not the overflow-hidden avatar box) so the badge
@@ -522,6 +532,9 @@ function renderActionPanel(snapshot) {
   $('#btn-action-politik').disabled = !isMyTurn || isPresident;
   $('#btn-action-sabotaj').disabled = !isMyTurn || isPresident;
   $('#btn-action-media').disabled = !isMyTurn;
+  // Raid isn't tied to rank progression the way Sabotaj/Politik are, so
+  // it's available to a President too - only turn-gated.
+  $('#btn-action-raid').disabled = !isMyTurn;
 
   const skipBtn = $('#btn-host-skip');
   skipBtn.hidden = !snapshot.isHost;
@@ -588,6 +601,21 @@ function appendPublicSupportBadge(container, player, extraClass) {
   badge.textContent = `${SHIELD_ICON}${player.publicSupportTurns}`;
   badge.title = PUBLIC_SUPPORT_TOOLTIP;
   container.appendChild(badge);
+}
+
+// Political Assets are public (unlike Public Support's badge, this is
+// about broadcasting "here's what's worth raiding from me", not a private
+// buff indicator) - one small icon badge per owned asset.
+function appendAssetBadges(container, player, extraClass) {
+  (player.assets || []).forEach((asset) => {
+    const def = opportunities.OPPORTUNITY_DEFINITIONS[asset.type];
+    if (!def) return;
+    const badge = document.createElement('span');
+    badge.className = extraClass ? `asset-badge ${extraClass}` : 'asset-badge';
+    badge.textContent = def.icon;
+    badge.title = `${def.name} - ${def.description()}`;
+    container.appendChild(badge);
+  });
 }
 
 function describeMediaCardLine(card) {
@@ -659,9 +687,72 @@ function openOffersModal(action, offers) {
   $('#action-picker-modal').hidden = false;
 }
 
+function makeTargetPickerRow(player, label, onClick) {
+  const btn = document.createElement('button');
+  btn.className = 'target-picker-item';
+  btn.type = 'button';
+
+  const avatar = document.createElement('div');
+  avatar.className = 'lobby-player-avatar';
+  avatar.innerHTML = renderAvatarSVG(player.avatar, 36);
+  btn.appendChild(avatar);
+
+  const name = document.createElement('span');
+  name.textContent = label;
+  btn.appendChild(name);
+
+  btn.addEventListener('click', onClick);
+  return btn;
+}
+
 function openTargetPicker(context) {
   const snapshot = match.getMatchSnapshot();
   const localPlayer = findLocalPlayer(snapshot);
+
+  // Political Raid targets a specific (player, asset) pair, not just a
+  // player - flatten every other player's owned assets into one list so
+  // there's no separate "now pick which asset" step.
+  if (context.mode === 'raid') {
+    $('#target-picker-title').textContent = 'Pilih Aset untuk Dirampas';
+    $('#kabel-banner').hidden = true;
+    const listEl = $('#target-picker-list');
+    listEl.innerHTML = '';
+    snapshot.players
+      .filter((p) => p.id !== localPlayer.id)
+      .flatMap((p) => (p.assets || []).map((asset) => ({ player: p, asset })))
+      .forEach(({ player, asset }) => {
+        const def = opportunities.OPPORTUNITY_DEFINITIONS[asset.type];
+        const label = `${player.name} — ${def ? def.name : asset.type}`;
+        listEl.appendChild(makeTargetPickerRow(player, label, () => {
+          sound.playClick();
+          $('#target-picker-modal').hidden = true;
+          openAttemptModal('raid', player.id, false, asset.id);
+        }));
+      });
+    $('#target-picker-modal').hidden = false;
+    return;
+  }
+
+  // Backroom Deal just needs a target to open the offer modal against -
+  // resolution isn't a chance roll like the other actions.
+  if (context.mode === 'deal') {
+    $('#target-picker-title').textContent = 'Pilih Sasaran Backroom Deal';
+    $('#kabel-banner').hidden = true;
+    const listEl = $('#target-picker-list');
+    listEl.innerHTML = '';
+    snapshot.players
+      .filter((p) => p.id !== localPlayer.id && p.connected)
+      .forEach((player) => {
+        listEl.appendChild(makeTargetPickerRow(player, player.name, () => {
+          sound.playClick();
+          $('#target-picker-modal').hidden = true;
+          openDealOfferModal(player);
+        }));
+      });
+    $('#target-picker-modal').hidden = false;
+    return;
+  }
+
   const localRankIndex = RANKS.indexOf(localPlayer.rank);
   const candidates = context.mode === 'sabotaj'
     ? (context.isKabel
@@ -705,6 +796,36 @@ function openTargetPicker(context) {
   $('#target-picker-modal').hidden = false;
 }
 
+// Composing an offer never touches match.js/the network until Send is
+// clicked - the slider max is just this player's own current holdings, so
+// they physically can't compose an offer they can't afford.
+function openDealOfferModal(target) {
+  currentDealTargetId = target.id;
+  const snapshot = match.getMatchSnapshot();
+  const localPlayer = findLocalPlayer(snapshot);
+
+  $('#deal-offer-target-line').textContent = `Offer to: ${target.name}`;
+
+  const moneySlider = $('#deal-offer-money-slider');
+  moneySlider.min = '0';
+  moneySlider.max = String(localPlayer.money);
+  moneySlider.step = '1000';
+  moneySlider.value = '0';
+  moneySlider.oninput = () => { $('#deal-offer-money-value').textContent = formatMoney(Number(moneySlider.value)); };
+
+  const influenceSlider = $('#deal-offer-influence-slider');
+  influenceSlider.min = '0';
+  influenceSlider.max = String(localPlayer.influence);
+  influenceSlider.step = '50';
+  influenceSlider.value = '0';
+  influenceSlider.oninput = () => { $('#deal-offer-influence-value').textContent = `+${influenceSlider.value}`; };
+
+  $('#deal-offer-money-value').textContent = formatMoney(0);
+  $('#deal-offer-influence-value').textContent = '+0';
+  $('#deal-offer-error').hidden = true;
+  $('#deal-offer-modal').hidden = false;
+}
+
 function makeBreakdownRow(label, value, cls) {
   const row = document.createElement('div');
   row.className = `attempt-breakdown-row${cls ? ` ${cls}` : ''}`;
@@ -723,6 +844,18 @@ function makeBreakdownRow(label, value, cls) {
 // with the target-rank-keyed KABEL_TABLE/cost instead of the attacker-rank
 // one - same math, same confirmation dialog.
 function resolveAttemptConfig(kind, fromRank, isKabel, targetRank) {
+  if (kind === 'raid') {
+    return {
+      baseCost: opportunities.getRaidCost(0),
+      baseChance: opportunities.describeRaidChance(0).base,
+      step: GAME_BALANCE.politicalOpportunity.raid.extraInfluenceStep,
+      bonus: GAME_BALANCE.politicalOpportunity.raid.extraInfluenceBonus / 100,
+      maxChance: GAME_BALANCE.politicalOpportunity.raid.maxChance / 100,
+      getCost: (extra) => opportunities.getRaidCost(extra),
+      getChance: (extra) => opportunities.calculateRaidChance(extra),
+      describe: null,
+    };
+  }
   if (kind === 'politik') {
     const config = politics.PROMOTION_TABLE[fromRank];
     return {
@@ -793,20 +926,25 @@ function updateAttemptPreview(kind, fromRank, localPlayer, extra, targetHasPubli
   if (!affordable) $('#attempt-error').textContent = 'Not enough Influence.';
 }
 
-function openAttemptModal(kind, targetId, isKabel = false) {
-  currentAttempt = { kind, targetId };
+function openAttemptModal(kind, targetId, isKabel = false, assetId = null) {
+  currentAttempt = { kind, targetId, assetId };
   const snapshot = match.getMatchSnapshot();
   const localPlayer = findLocalPlayer(snapshot);
   const fromRank = localPlayer.rank;
-  const target = kind === 'sabotaj' ? snapshot.players.find((p) => p.id === targetId) : null;
+  const target = kind !== 'politik' ? snapshot.players.find((p) => p.id === targetId) : null;
   const targetHasPublicSupport = Boolean(target && target.publicSupportTurns > 0);
   const targetRank = target ? target.rank : null;
 
-  $('#attempt-title').textContent = kind === 'politik' ? 'Politik' : (isKabel ? '🕴️ KABEL' : 'Sabotaj');
-  $('#btn-attempt-confirm .menu-btn-label').textContent = kind === 'sabotaj' ? 'Attack' : 'Confirm';
+  const titles = { politik: 'Politik', raid: 'Political Raid', sabotaj: isKabel ? '🕴️ KABEL' : 'Sabotaj' };
+  $('#attempt-title').textContent = titles[kind];
+  $('#btn-attempt-confirm .menu-btn-label').textContent = kind === 'politik' ? 'Confirm' : 'Attack';
 
   const targetLine = $('#attempt-target-line');
-  if (kind === 'sabotaj') {
+  if (kind === 'raid') {
+    const def = opportunities.OPPORTUNITY_DEFINITIONS[snapshot.players.find((p) => p.id === targetId)?.assets.find((a) => a.id === assetId)?.type];
+    targetLine.textContent = `Target: ${target ? target.name : ''} — ${def ? def.name : ''}`;
+    targetLine.hidden = false;
+  } else if (kind === 'sabotaj') {
     targetLine.textContent = '';
     targetLine.appendChild(document.createTextNode(`Target: ${target ? target.name : ''}`));
     if (target) appendPublicSupportBadge(targetLine, target);
@@ -974,26 +1112,26 @@ function renderMatchEnd(snapshot) {
   sound.playPromotion();
 }
 
-// A National Event is a top-layer announcement, not a screen of its own -
-// it can land on top of the match screen mid-game or right as the match
-// ends, and either way just sits above whatever's already rendered until
-// the player dismisses it locally (no host round-trip needed for that,
-// since the round/effects have already been applied server-side).
-function showNationalEventOverlay(pending) {
+// A News item (National Event or a leaked Backroom Deal) is a top-layer
+// announcement, not a screen of its own - it can land on top of the match
+// screen mid-game or right as the match ends, and either way just sits
+// above whatever's already rendered until the player dismisses it locally
+// (no host round-trip needed for that, since the effects have already been
+// applied server-side).
+function showNewsOverlay(pending) {
   if (!pending || pending.seq === lastSeenEventSeq) return;
   lastSeenEventSeq = pending.seq;
-  const { event } = pending;
-  $('#national-event-icon').textContent = event.icon;
-  $('#national-event-name').textContent = event.name;
-  $('#national-event-description').textContent = event.description;
-  $('#national-event-overlay').hidden = false;
+  $('#news-icon').textContent = pending.icon;
+  $('#news-headline').textContent = pending.headline;
+  $('#news-description').textContent = pending.description;
+  $('#news-overlay').hidden = false;
   sound.playWarning();
 }
 
 function renderMatchScreen(snapshot) {
   if (!snapshot.started) return;
 
-  showNationalEventOverlay(snapshot.pendingNationalEvent);
+  showNewsOverlay(snapshot.pendingNews);
 
   if (snapshot.matchOver) {
     if (!hasEnteredMatchEndScreen) {
@@ -1055,6 +1193,24 @@ function wireMatchActions() {
     match.requestSabotajOptions();
   });
 
+  $('#btn-action-raid').addEventListener('click', () => {
+    sound.playClick();
+    const snapshot = match.getMatchSnapshot();
+    const localPlayer = findLocalPlayer(snapshot);
+    const hasAnyTarget = snapshot.players.some((p) => p.id !== localPlayer.id && (p.assets || []).length > 0);
+    if (!hasAnyTarget) {
+      showToast('No Political Assets to raid yet.');
+      return;
+    }
+    openTargetPicker({ mode: 'raid' });
+  });
+
+  // Backroom Deal is never turn-gated - available any time to any player.
+  $('#btn-backroom-deal').addEventListener('click', () => {
+    sound.playClick();
+    openTargetPicker({ mode: 'deal' });
+  });
+
   $('#btn-picker-cancel').addEventListener('click', () => {
     $('#action-picker-modal').hidden = true;
   });
@@ -1072,10 +1228,44 @@ function wireMatchActions() {
     sound.playClick();
     if (currentAttempt.kind === 'politik') {
       match.attemptPolitik(extra);
+    } else if (currentAttempt.kind === 'raid') {
+      match.attemptRaid(currentAttempt.targetId, currentAttempt.assetId, extra);
     } else {
       match.attemptSabotaj(currentAttempt.targetId, extra);
     }
     $('#attempt-modal').hidden = true;
+  });
+
+  $('#btn-deal-offer-cancel-x').addEventListener('click', () => {
+    $('#deal-offer-modal').hidden = true;
+  });
+
+  $('#btn-deal-offer-send').addEventListener('click', () => {
+    const money = Number($('#deal-offer-money-slider').value);
+    const influence = Number($('#deal-offer-influence-slider').value);
+    if (money === 0 && influence === 0) {
+      $('#deal-offer-error').hidden = false;
+      $('#deal-offer-error').textContent = 'Offer at least some Money or Influence.';
+      return;
+    }
+    sound.playClick();
+    match.proposeBackroomDeal(currentDealTargetId, money, influence);
+    $('#deal-offer-modal').hidden = true;
+    showToast('Offer sent secretly.');
+  });
+
+  $('#btn-deal-accept').addEventListener('click', () => {
+    sound.playClick();
+    $('#deal-incoming-overlay').hidden = true;
+    if (currentIncomingDeal) match.respondToBackroomDeal(currentIncomingDeal.dealId, true);
+    currentIncomingDeal = null;
+  });
+
+  $('#btn-deal-reject').addEventListener('click', () => {
+    sound.playClick();
+    $('#deal-incoming-overlay').hidden = true;
+    if (currentIncomingDeal) match.respondToBackroomDeal(currentIncomingDeal.dealId, false);
+    currentIncomingDeal = null;
   });
 
   $('#btn-match-end-menu').addEventListener('click', () => {
@@ -1090,9 +1280,9 @@ function wireMatchActions() {
     showScreen('main-menu');
   });
 
-  $('#btn-national-event-continue').addEventListener('click', () => {
+  $('#btn-news-continue').addEventListener('click', () => {
     sound.playClick();
-    $('#national-event-overlay').hidden = true;
+    $('#news-overlay').hidden = true;
   });
 }
 
@@ -1128,6 +1318,41 @@ function wireMatchEvents() {
       return;
     }
     openTargetPicker({ mode: 'sabotaj', rank: nextRank, isKabel: false });
+  });
+
+  // A Backroom Deal offer/result is delivered only to the two people
+  // involved (see match.js's notifyPlayer) - this listener is the entire
+  // client-side surface for that, no polling or turn-gating needed since
+  // it can land at any moment for any player.
+  bus.on('match:deal-offer', (e) => {
+    currentIncomingDeal = e.detail;
+    const { fromName, money, influence } = e.detail;
+    const parts = [];
+    if (money) parts.push(formatMoney(money));
+    if (influence) parts.push(`${influence} Influence`);
+    $('#deal-incoming-description').textContent = `${fromName} secretly offers you ${parts.join(' + ')}.`;
+    $('#deal-incoming-overlay').hidden = false;
+    sound.playWarning();
+  });
+
+  bus.on('match:deal-result', (e) => {
+    const { accepted, leaked, fellThrough, role, money, influence } = e.detail;
+    const parts = [];
+    if (money) parts.push(formatMoney(money));
+    if (influence) parts.push(`${influence} Influence`);
+    const amountText = parts.join(' + ');
+    let message;
+    if (!accepted) {
+      message = fellThrough ? 'Your offer fell through — you no longer had enough to cover it.' : 'Your offer was declined.';
+    } else if (leaked) {
+      message = 'Your backroom deal leaked! You will skip your next turn.';
+    } else if (role === 'offerer') {
+      message = `Deal done — you paid ${amountText}.`;
+    } else {
+      message = `Deal done — you received ${amountText}.`;
+    }
+    showToast(message, 4500);
+    if (accepted && !leaked) sound.playCoins(); else if (leaked) sound.playWarning(); else sound.playClick();
   });
 }
 

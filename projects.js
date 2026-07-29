@@ -8,6 +8,7 @@
 import { pickRandomUnique } from './utils.js';
 import { applyScandalDelta } from './effects.js';
 import { getEconomyScale } from './player.js';
+import { hasAsset } from './politicalOpportunities.js';
 import { GAME_BALANCE } from './balance.js';
 
 export const PROJECT_CARDS = Object.entries(GAME_BALANCE.projects.cards).flatMap(([category, cards]) =>
@@ -25,13 +26,18 @@ export function getProjectCard(id) {
 // Mutates `player` directly. Returns the applied card for the caller to
 // surface as feedback. Money/influence rewards scale down slightly as the
 // table grows (see getEconomyScale) so a full room doesn't flood the
-// economy compared to a small one - scandal cost is untouched.
+// economy compared to a small one - scandal cost is untouched. Corporate
+// Sponsor (a Political Asset) stacks on top of that scaling as a further
+// money multiplier for its owner.
 export function resolveProjek(player, cardId, playerCount) {
   const card = getProjectCard(cardId);
   if (!card) return null;
 
   const scale = getEconomyScale(playerCount);
-  player.money += Math.round(card.money * scale);
+  const sponsorBonus = hasAsset(player, 'corporateSponsor')
+    ? 1 + GAME_BALANCE.politicalOpportunity.assets.corporateSponsor.projekMoneyBonusPercent / 100
+    : 1;
+  player.money += Math.round(card.money * scale * sponsorBonus);
   player.influence += Math.round(card.influence * scale);
   applyScandalDelta(player, card.scandal);
   player.stats.projectsCompleted += 1;

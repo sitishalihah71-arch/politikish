@@ -67,6 +67,13 @@ export function initMatchState(player) {
   // before it ever reaches the network (see maskPlayersFor in match.js).
   player.politicalNetwork = { infrastructure: 0, publicServices: 0, administration: 0 };
   player.hasKabel = false;
+  // Political Assets are the opposite of Kabel/Political Network - public
+  // and openly visible, since the whole point is other players can see
+  // what's worth raiding from you.
+  player.assets = [];
+  // Set by backroomDeals.js when a bribe leaks; consumed automatically the
+  // next time this player's turn comes up (see match.js's advanceTurn).
+  player.skipNextTurn = false;
 }
 
 export function getNextRank(rank) {

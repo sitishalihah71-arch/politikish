@@ -652,15 +652,15 @@ button {
   padding: 20px;
 }
 
-/* National Event announcement is a top-layer pause, not a screen - it can
-   land on top of the match or match-end screen either way, so it sits above
-   every other modal too. */
-.national-event-overlay {
+/* A News item (National Event or a leaked Backroom Deal) is a top-layer
+   pause, not a screen - it can land on top of the match or match-end
+   screen either way, so it sits above every other modal too. */
+.news-overlay {
   z-index: 200;
   background: rgba(4, 6, 10, 0.85);
 }
 
-.national-event-card {
+.news-card {
   width: min(340px, calc(100vw - 32px));
   display: flex;
   flex-direction: column;
@@ -671,27 +671,89 @@ button {
   border-color: var(--gold-dim);
 }
 
-.national-event-icon {
+.news-icon {
   font-size: 48px;
   line-height: 1;
 }
 
-.national-event-name {
+.news-headline {
   margin: 0;
   font-size: 20px;
   font-weight: 800;
   color: var(--gold);
 }
 
-.national-event-description {
+.news-description {
   margin: 0;
   font-size: 14px;
   color: var(--text-secondary);
 }
 
-.national-event-card .menu-btn {
+.news-card .menu-btn {
   width: 100%;
   margin-top: 8px;
+}
+
+/* Backroom Deal - the "incoming offer" overlay uses a distinct purple/shady
+   tint to read as a secret negotiation rather than a public announcement. */
+.deal-overlay {
+  z-index: 210;
+  background: rgba(4, 6, 10, 0.85);
+}
+
+.deal-incoming-card {
+  width: min(340px, calc(100vw - 32px));
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 12px;
+  padding: 28px 24px;
+  border-color: var(--purple);
+}
+
+.deal-incoming-icon {
+  font-size: 40px;
+  line-height: 1;
+}
+
+.deal-incoming-title {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 800;
+  color: var(--purple);
+}
+
+.deal-incoming-description {
+  margin: 0;
+  font-size: 14px;
+  color: var(--text-secondary);
+}
+
+.deal-incoming-actions {
+  display: flex;
+  gap: 10px;
+  width: 100%;
+  margin-top: 8px;
+}
+
+.deal-incoming-actions .menu-btn {
+  flex: 1;
+}
+
+.backroom-deal-btn {
+  width: 100%;
+  padding: 10px 14px;
+  border-radius: var(--radius-sm);
+  border: 1px dashed var(--purple);
+  background: var(--bg-card);
+  color: var(--purple);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.backroom-deal-btn:hover {
+  background: var(--bg-card-raised);
 }
 
 .modal-header {
@@ -1096,6 +1158,8 @@ button {
 .action-sabotaj .action-name { color: var(--red); }
 .action-media { border-color: #3a3f4d; }
 .action-media .action-name { color: var(--gray-icon); }
+.action-raid { border-color: #5a3a80; }
+.action-raid .action-name { color: var(--purple); }
 
 .scandal-meter {
   background: var(--bg-panel);
@@ -1403,6 +1467,13 @@ button {
   font-weight: 700;
   color: var(--gold);
   white-space: nowrap;
+}
+
+/* Political Assets are public by design - a small icon per owned asset,
+   inline so a player holding several doesn't need extra layout room. */
+.asset-badge {
+  margin-left: 4px;
+  font-size: 11px;
 }
 
 .attempt-stats {

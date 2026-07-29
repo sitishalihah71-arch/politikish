@@ -233,7 +233,13 @@
             <span class="action-name">Kempen Imej</span>
             <span class="action-desc">Bayar media untuk kurangkan skandal anda.</span>
           </button>
+          <button class="action-card action-raid" id="btn-action-raid" type="button">
+            <span class="action-name">Political Raid</span>
+            <span class="action-desc">Cuba rampas Aset Politik pemain lain.</span>
+          </button>
         </div>
+
+        <button id="btn-backroom-deal" class="backroom-deal-btn" type="button">🤝 Backroom Deal</button>
 
         <div class="scandal-meter">
           <div class="scandal-meter-header">
@@ -347,14 +353,58 @@
     </div>
   </div>
 
-  <div id="national-event-overlay" class="modal-overlay national-event-overlay" hidden>
-    <div class="modal-card national-event-card" role="dialog" aria-modal="true">
-      <div class="national-event-icon" id="national-event-icon">📈</div>
-      <h2 id="national-event-name" class="national-event-name">Economic Boom</h2>
-      <p id="national-event-description" class="national-event-description"></p>
-      <button id="btn-national-event-continue" class="menu-btn menu-btn-primary" type="button">
+  <div id="news-overlay" class="modal-overlay news-overlay" hidden>
+    <div class="modal-card news-card" role="dialog" aria-modal="true">
+      <div class="news-icon" id="news-icon">📈</div>
+      <h2 id="news-headline" class="news-headline">BREAKING NEWS</h2>
+      <p id="news-description" class="news-description"></p>
+      <button id="btn-news-continue" class="menu-btn menu-btn-primary" type="button">
         <span class="menu-btn-label">Continue</span>
       </button>
+    </div>
+  </div>
+
+  <div id="deal-offer-modal" class="modal-overlay" hidden>
+    <div class="modal-card" role="dialog" aria-modal="true">
+      <div class="modal-header">
+        <h2>Backroom Deal</h2>
+        <button id="btn-deal-offer-cancel-x" class="icon-btn icon-btn-small" type="button" aria-label="Cancel">
+          <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+        </button>
+      </div>
+      <div class="modal-body">
+        <p id="deal-offer-target-line" class="room-status"></p>
+        <div class="setting-row">
+          <label for="deal-offer-money-slider">Money</label>
+          <span id="deal-offer-money-value">RM0</span>
+        </div>
+        <input id="deal-offer-money-slider" type="range" min="0" max="0" step="1000" value="0">
+        <div class="setting-row">
+          <label for="deal-offer-influence-slider">Influence</label>
+          <span id="deal-offer-influence-value">+0</span>
+        </div>
+        <input id="deal-offer-influence-slider" type="range" min="0" max="0" step="50" value="0">
+        <p id="deal-offer-error" class="field-error" hidden></p>
+        <button id="btn-deal-offer-send" class="menu-btn menu-btn-primary" type="button">
+          <span class="menu-btn-label">Send Offer</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <div id="deal-incoming-overlay" class="modal-overlay deal-overlay" hidden>
+    <div class="modal-card deal-incoming-card" role="dialog" aria-modal="true">
+      <div class="deal-incoming-icon">🤝</div>
+      <h2 class="deal-incoming-title">Backroom Deal</h2>
+      <p id="deal-incoming-description" class="deal-incoming-description"></p>
+      <div class="deal-incoming-actions">
+        <button id="btn-deal-reject" class="menu-btn menu-btn-secondary" type="button">
+          <span class="menu-btn-label">Reject</span>
+        </button>
+        <button id="btn-deal-accept" class="menu-btn menu-btn-primary" type="button">
+          <span class="menu-btn-label">Accept</span>
+        </button>
+      </div>
     </div>
   </div>
 

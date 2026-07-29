@@ -89,12 +89,9 @@ export const GAME_BALANCE = {
   // category opens a chance to unlock KABEL, re-rolled on every further
   // successful Project in that category until either this player wins it
   // or someone else already has (see match.js's maybeRollKabelUnlock).
-  // TEMPORARY test values - lower threshold + guaranteed roll so KABEL
-  // unlocks on the very first successful Project, for quick testing.
-  // Revert to threshold: 3, unlockChancePercent: 30 for real play.
   politicalNetwork: {
-    threshold: 1,
-    unlockChancePercent: 100,
+    threshold: 3,
+    unlockChancePercent: 30,
   },
 
   nationalEvents: {
@@ -104,5 +101,37 @@ export const GAME_BALANCE = {
   kabel: {
     cost: 500,
     targetChances: { ketua: 50, deputy: 30, president: 15 },
+  },
+
+  // Political Assets are permanent, publicly-visible bonuses (unlike KABEL/
+  // Political Network, there's nothing secret about who owns one - the
+  // whole point is that they're worth raiding). Each player is dealt one
+  // at match start; Political Raid is the only way to take one afterward.
+  politicalOpportunity: {
+    assets: {
+      mediaEmpire: { influencePerRound: 40 },
+      corporateSponsor: { projekMoneyBonusPercent: 20 },
+      partyMachinery: { promotionChanceBonusPercent: 10 },
+      royalConnection: { sabotageDefensePercent: 15 },
+    },
+    raid: {
+      cost: 300,
+      baseChance: 40,
+      extraInfluenceBonus: 10,
+      extraInfluenceStep: 50,
+      maxChance: 80,
+      minimumChance: 10,
+    },
+  },
+
+  // Backroom Deals never appear in any broadcast the other players can see
+  // - only the leak roll (checked when the target accepts) has a visible
+  // consequence. Leak chance scales with whichever party is more scandalous,
+  // so a "clean" politician is a safer bribery partner than a scandalous one.
+  backroomDeals: {
+    leakBaseChance: 10,
+    leakScandalWeightPercent: 60,
+    leakMaxChance: 90,
+    skipTurnsOnLeak: 1,
   },
 };

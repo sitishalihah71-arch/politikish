@@ -23,6 +23,8 @@ import { generateMediaOffers, resolveMedia } from './media.js';
 import { resolvePolitik } from './politics.js';
 import { resolveSabotaj } from './sabotage.js';
 import { pickNationalEvent, applyNationalEvent } from './events.js';
+import { dealStartingAssets, hasAsset, resolveRaid } from './politicalOpportunities.js';
+import { proposeDeal, respondToDeal, resetDeals } from './backroomDeals.js';
 import { GAME_BALANCE } from './balance.js';
 
 let matchStarted = false;
@@ -46,11 +48,19 @@ let actionSeq = 0; // lets ui.js tell a genuinely new action apart from a re-bro
 // on its own copy of that field.
 let kabelClaimed = false;
 
-// Host picks and applies the event, then broadcasts it once (with a seq so
-// clients can tell a new event apart from a re-broadcast) - every client
-// shows the full-screen announcement and dismisses it locally on Continue.
-let pendingNationalEvent = null;
-let eventSeq = 0;
+// Generic "breaking news" surface: any host-side module can post one, and
+// every client shows the same full-screen announcement and dismisses it
+// locally on Continue. National Events post through this; Backroom Deal
+// leaks (the one moment a private deal becomes public) are the other
+// current producer. The seq lets clients tell a new item apart from a
+// re-broadcast of the same one.
+let pendingNews = null;
+let newsSeq = 0;
+
+function postNews({ icon, headline, description }) {
+  newsSeq += 1;
+  pendingNews = { icon, headline, description, seq: newsSeq };
+}
 
 function isHostRole() {
   return room.getRoomSnapshot().isHost;
@@ -95,7 +105,7 @@ export function getMatchSnapshot() {
     isHost: roomSnap.isHost,
     lastAction,
     lastPenalized,
-    pendingNationalEvent,
+    pendingNews,
   };
 }
 
@@ -109,7 +119,7 @@ function buildBroadcastPayloadFor(viewerId) {
     players: maskPlayersFor(currentPlayers(), viewerId),
     lastAction,
     lastPenalized,
-    pendingNationalEvent,
+    pendingNews,
   };
 }
 
@@ -155,8 +165,17 @@ function maybeTriggerNationalEvent(completedRound, players) {
 
   const event = pickNationalEvent();
   players.forEach((p) => applyNationalEvent(event, p));
-  eventSeq += 1;
-  pendingNationalEvent = { event, seq: eventSeq };
+  postNews({ icon: event.icon, headline: event.name, description: event.description });
+}
+
+// Media Empire pays out once per completed round, to every owner - not tied
+// to any single action the way the other assets' bonuses are.
+function applyMediaEmpirePassive(completedRound, players) {
+  if (completedRound === null) return;
+  const bonus = GAME_BALANCE.politicalOpportunity.assets.mediaEmpire.influencePerRound;
+  players.forEach((p) => {
+    if (hasAsset(p, 'mediaEmpire')) p.influence += bonus;
+  });
 }
 
 // Turn order cycles through whichever slots are actually present, sorted
@@ -211,10 +230,24 @@ function advanceTurn({ skipSupportTick = false } = {}) {
   turnSlot = activeSlots[nextIndex];
   currentRound = round;
 
+  applyMediaEmpirePassive(completedRound, players);
   maybeTriggerNationalEvent(completedRound, players);
 
   if (round > maxRounds) {
     endMatch(players);
+    return;
+  }
+
+  // A bribery leak benches both parties for their next turn (see
+  // backroomDeals.js). Auto-resolve it the moment their turn comes up,
+  // exactly like the manual host skip - they still "take" the turn (a
+  // visible skip notification fires) rather than being silently passed
+  // over the way a disconnected player is.
+  const newActive = players.find((p) => p.slot === turnSlot);
+  if (newActive && newActive.skipNextTurn) {
+    newActive.skipNextTurn = false;
+    setLastAction({ type: 'skip', actorId: newActive.id, reason: 'bribery-leak' });
+    advanceTurn();
     return;
   }
 
@@ -334,6 +367,92 @@ function hostResolveSabotaj(playerId, targetId, extraInfluence, respond) {
   advanceTurn();
 }
 
+function hostResolveRaid(playerId, targetId, assetId, extraInfluence, respond) {
+  if (!isActivePlayerId(playerId)) return;
+  const players = room.getPlayersLive();
+  const player = players.find((p) => p.id === playerId);
+  const target = players.find((p) => p.id === targetId);
+  if (!player) return;
+  const result = resolveRaid(player, target, assetId, extraInfluence);
+  if (!result.ok) {
+    respond({ type: 'action-rejected', payload: { reason: result.reason } });
+    return;
+  }
+  setLastAction({
+    type: 'raid',
+    actorId: playerId,
+    targetId,
+    success: result.success,
+    chance: result.chance,
+    cost: result.cost,
+    assetType: result.assetType,
+  });
+  advanceTurn();
+}
+
+// Delivers a message to exactly one player, whether that's a remote client
+// (over their own connection) or the host's own local screen (via bus,
+// since the host never sends itself network messages) - used for Backroom
+// Deal offers/results, which must never be broadcast to anyone else.
+function notifyPlayer(playerId, type, payload) {
+  if (playerId === room.getRoomSnapshot().localPlayerId) {
+    bus.emit(`match:${type}`, payload);
+    return;
+  }
+  const conn = room.getConnectionsByPlayerId().get(playerId);
+  if (conn) multiplayer.send({ type, payload }, conn);
+}
+
+// Backroom Deals are not turn actions - any connected player can propose or
+// respond at any time (see backroomDeals.js), so neither of these checks
+// isActivePlayerId the way every other resolver does.
+function hostProposeDeal(offererId, targetId, money, influence, respond) {
+  const players = room.getPlayersLive();
+  const offerer = players.find((p) => p.id === offererId);
+  const target = players.find((p) => p.id === targetId);
+  if (!offerer) return;
+  const result = proposeDeal(offerer, target, money, influence);
+  if (!result.ok) {
+    respond({ type: 'action-rejected', payload: { reason: result.reason } });
+    return;
+  }
+  notifyPlayer(targetId, 'deal-offer', {
+    dealId: result.dealId,
+    fromId: offererId,
+    fromName: offerer.name,
+    money: result.money,
+    influence: result.influence,
+  });
+}
+
+function hostRespondToDeal(responderId, dealId, accept) {
+  const players = room.getPlayersLive();
+  const result = respondToDeal(dealId, accept, players);
+  if (!result.ok) return; // already resolved/expired - nothing to do
+
+  if (!result.accepted) {
+    notifyPlayer(result.offererId, 'deal-result', { accepted: false, fellThrough: Boolean(result.fellThrough) });
+    return;
+  }
+
+  if (result.leaked) {
+    const offerer = players.find((p) => p.id === result.offererId);
+    const target = players.find((p) => p.id === result.targetId);
+    postNews({
+      icon: '📰',
+      headline: 'BREAKING NEWS',
+      description: `A secret political deal between ${offerer?.name || 'a politician'} and ${target?.name || 'a politician'} was exposed! Both lose their next turn.`,
+    });
+  }
+
+  // Deliberately no setLastAction here - deals never generate the usual
+  // "X did Y" toast, leaked or not. The only public trace of a leaked deal
+  // is the news item above; a clean deal leaves none at all.
+  notifyPlayer(result.offererId, 'deal-result', { accepted: true, leaked: result.leaked, role: 'offerer', money: result.money, influence: result.influence });
+  notifyPlayer(result.targetId, 'deal-result', { accepted: true, leaked: result.leaked, role: 'target', money: result.money, influence: result.influence });
+  broadcastMatchUpdate();
+}
+
 function handleHostMatchMessage(type, payload, conn) {
   if (!matchStarted || !isHostRole()) return;
   const respond = (msg) => multiplayer.send(msg, conn);
@@ -359,6 +478,14 @@ function handleHostMatchMessage(type, payload, conn) {
   } else if (type === 'sabotaj-attempt') {
     if (!isFromConn(conn)) return;
     hostResolveSabotaj(conn.peer, payload?.targetId, payload?.extraInfluence || 0, respond);
+  } else if (type === 'raid-attempt') {
+    if (!isFromConn(conn)) return;
+    hostResolveRaid(conn.peer, payload?.targetId, payload?.assetId, payload?.extraInfluence || 0, respond);
+  } else if (type === 'deal-propose') {
+    // Not turn-gated - any connected player can propose a bribe at any time.
+    hostProposeDeal(conn.peer, payload?.targetId, payload?.money || 0, payload?.influence || 0, respond);
+  } else if (type === 'deal-respond') {
+    hostRespondToDeal(conn.peer, payload?.dealId, Boolean(payload?.accept));
   }
 }
 
@@ -378,7 +505,7 @@ function handleClientMatchMessage(type, payload) {
     clientPlayers = payload.players;
     lastAction = payload.lastAction;
     lastPenalized = payload.lastPenalized || [];
-    pendingNationalEvent = payload.pendingNationalEvent || null;
+    pendingNews = payload.pendingNews || null;
     bus.emit('match:updated', getMatchSnapshot());
   } else if (type === 'projek-offers') {
     bus.emit('match:offers', { action: 'projek', offers: payload.offers });
@@ -386,6 +513,10 @@ function handleClientMatchMessage(type, payload) {
     bus.emit('match:offers', { action: 'media', offers: payload.offers });
   } else if (type === 'sabotaj-options') {
     bus.emit('match:sabotaj-options', { isKabel: Boolean(payload.isKabel) });
+  } else if (type === 'deal-offer') {
+    bus.emit('match:deal-offer', payload);
+  } else if (type === 'deal-result') {
+    bus.emit('match:deal-result', payload);
   } else if (type === 'action-rejected') {
     bus.emit('match:action-rejected', { reason: payload.reason });
   }
@@ -459,6 +590,35 @@ export function attemptSabotaj(targetId, extraInfluence) {
   }
 }
 
+export function attemptRaid(targetId, assetId, extraInfluence) {
+  if (isHostRole()) {
+    hostResolveRaid(room.getRoomSnapshot().localPlayerId, targetId, assetId, extraInfluence, (msg) => {
+      bus.emit('match:action-rejected', { reason: msg.payload.reason });
+    });
+  } else {
+    multiplayer.send({ type: 'raid-attempt', payload: { targetId, assetId, extraInfluence } });
+  }
+}
+
+// Backroom Deals are never turn-gated - can be called any time, by anyone.
+export function proposeBackroomDeal(targetId, money, influence) {
+  if (isHostRole()) {
+    hostProposeDeal(room.getRoomSnapshot().localPlayerId, targetId, money, influence, (msg) => {
+      bus.emit('match:action-rejected', { reason: msg.payload.reason });
+    });
+  } else {
+    multiplayer.send({ type: 'deal-propose', payload: { targetId, money, influence } });
+  }
+}
+
+export function respondToBackroomDeal(dealId, accept) {
+  if (isHostRole()) {
+    hostRespondToDeal(room.getRoomSnapshot().localPlayerId, dealId, accept);
+  } else {
+    multiplayer.send({ type: 'deal-respond', payload: { dealId, accept } });
+  }
+}
+
 // Host-only manual override: forces the current player's turn to end with
 // no resolution (no cost, no resource change) - for a player who's still
 // connected but has stepped away, which the automatic disconnect-skip in
@@ -478,7 +638,8 @@ bus.on('room:match-started', () => {
   matchOver = false;
   winnerId = null;
   kabelClaimed = false;
-  pendingNationalEvent = null;
+  pendingNews = null;
+  resetDeals();
 
   const roomSnap = room.getRoomSnapshot();
   maxRounds = roomSnap.settings.rounds;
@@ -486,6 +647,7 @@ bus.on('room:match-started', () => {
   if (isHostRole()) {
     const players = room.getPlayersLive();
     players.forEach(initMatchState);
+    dealStartingAssets(players);
     currentRound = 1;
     const bySlot = [...players].sort((a, b) => a.slot - b.slot);
     turnSlot = (bySlot.find((p) => p.connected) || bySlot[0]).slot;
@@ -519,5 +681,6 @@ export function resetMatch() {
   winnerId = null;
   clientPlayers = [];
   kabelClaimed = false;
-  pendingNationalEvent = null;
+  pendingNews = null;
+  resetDeals();
 }
