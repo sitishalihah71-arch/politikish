@@ -1003,7 +1003,9 @@ function handleActionFeedback(snapshot) {
       : `${actorName}'s ${label} on ${targetName} failed.`;
     if (action.success) sound.playPromotion(); else sound.playFailure();
   } else if (action.type === 'skip') {
-    message = `Host skipped ${actorName}'s turn.`;
+    message = action.reason === 'bribery-leak'
+      ? `${actorName}'s turn was skipped — their backroom deal leaked!`
+      : `Host skipped ${actorName}'s turn.`;
     sound.playWarning();
   }
 

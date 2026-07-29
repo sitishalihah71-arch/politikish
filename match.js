@@ -242,12 +242,18 @@ function advanceTurn({ skipSupportTick = false } = {}) {
   // backroomDeals.js). Auto-resolve it the moment their turn comes up,
   // exactly like the manual host skip - they still "take" the turn (a
   // visible skip notification fires) rather than being silently passed
-  // over the way a disconnected player is.
+  // over the way a disconnected player is. Broadcast before recursing so
+  // that when a leak benches two players in a row, both skips reach every
+  // client instead of the second overwriting the first's lastAction. The
+  // recursive call is deferred a beat so the host's own screen - which
+  // renders synchronously off this same call stack - actually paints each
+  // skip toast instead of collapsing them all into the final one.
   const newActive = players.find((p) => p.slot === turnSlot);
   if (newActive && newActive.skipNextTurn) {
     newActive.skipNextTurn = false;
     setLastAction({ type: 'skip', actorId: newActive.id, reason: 'bribery-leak' });
-    advanceTurn();
+    broadcastMatchUpdate();
+    setTimeout(() => advanceTurn(), 1500);
     return;
   }
 
