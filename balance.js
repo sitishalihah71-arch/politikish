@@ -159,4 +159,13 @@ export const GAME_BALANCE = {
     intervalRounds: 7,
     voteDurationMs: 90000,
   },
+
+  // Black Market: the guaranteed, Money-priced counterpart to Political
+  // Raid's risky, Influence-priced theft - same asset pool, a different
+  // resource and a different risk profile. One flat price for every asset
+  // type; a first pass doesn't need per-type balancing.
+  blackMarket: {
+    price: 8000,
+    offerCount: 3,
+  },
 };

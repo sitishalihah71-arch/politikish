@@ -11,7 +11,7 @@
 // politics.js's resolve functions already are.
 
 import { GAME_BALANCE } from './balance.js';
-import { shuffle } from './utils.js';
+import { shuffle, pickRandomUnique } from './utils.js';
 
 export const ASSET_TYPES = ['mediaEmpire', 'corporateSponsor', 'partyMachinery', 'royalConnection'];
 
@@ -38,7 +38,7 @@ export const OPPORTUNITY_DEFINITIONS = {
   },
 };
 
-function createAsset(type, ownerId) {
+export function createAsset(type, ownerId) {
   return {
     id: `${type}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
     type,
@@ -113,4 +113,40 @@ export function resolveRaid(attacker, target, assetId, extraInfluence, rng = Mat
   }
 
   return { ok: true, success, chance, cost, assetType: asset.type, targetId: target.id };
+}
+
+// --- Black Market: the guaranteed, Money-priced counterpart to Raid's
+// risky, Influence-priced theft - same asset pool, reused createAsset,
+// just a different acquisition path with no chance roll involved.
+const { blackMarket: marketCfg } = GAME_BALANCE;
+
+export function getMarketPrice() {
+  return marketCfg.price;
+}
+
+// Only offers types the buyer doesn't already own - a duplicate of
+// something Raid could otherwise steal isn't an interesting purchase.
+// Returns fewer than `offerCount` once fewer types remain, and an empty
+// array once the buyer already owns all of them.
+export function generateMarketOffers(player) {
+  const available = ASSET_TYPES.filter((type) => !hasAsset(player, type));
+  return pickRandomUnique(available, Math.min(marketCfg.offerCount, available.length));
+}
+
+// reason codes: 'already-owned' | 'insufficient-money'
+export function validateMarketPurchase(player, type) {
+  if (!ASSET_TYPES.includes(type) || hasAsset(player, type)) return { ok: false, reason: 'already-owned' };
+  if (player.money < marketCfg.price) return { ok: false, reason: 'insufficient-money' };
+  return { ok: true, price: marketCfg.price };
+}
+
+export function buyAsset(player, type) {
+  const validation = validateMarketPurchase(player, type);
+  if (!validation.ok) return validation;
+
+  player.money -= validation.price;
+  const asset = createAsset(type, player.id);
+  player.assets.push(asset);
+
+  return { ok: true, assetType: type, price: validation.price };
 }

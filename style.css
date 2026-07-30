@@ -1221,6 +1221,8 @@ button {
 .action-media .action-name { color: var(--gray-icon); }
 .action-raid { border-color: #5a3a80; }
 .action-raid .action-name { color: var(--purple); }
+.action-market { border-color: var(--gold-dim); }
+.action-market .action-name { color: var(--gold); }
 
 .scandal-meter {
   background: var(--bg-panel);
@@ -1363,6 +1365,44 @@ button {
 .political-network-row span:last-child {
   font-weight: 700;
   color: var(--text-primary);
+}
+
+/* Private to the local player only - never populated with another
+   player's data (see match.js's maskPlayersFor), same rule as
+   .political-network above. */
+.secret-objective-panel {
+  background: var(--bg-panel);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.secret-objective-panel h4 {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 1px;
+  color: var(--text-secondary);
+}
+
+.secret-objective-panel p {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-primary);
+}
+
+.secret-objective-status {
+  align-self: flex-start;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-muted);
+}
+
+.secret-objective-status.is-complete {
+  color: var(--green);
 }
 
 /* --- Bottom bar --- */

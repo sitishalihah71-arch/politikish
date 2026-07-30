@@ -11,6 +11,7 @@ import { hasOpenSeat } from './effects.js';
 import * as politics from './politics.js';
 import * as sabotage from './sabotage.js';
 import * as opportunities from './politicalOpportunities.js';
+import { SECRET_OBJECTIVES } from './objectives.js';
 import { GAME_BALANCE } from './balance.js';
 
 let settings = loadSettings();
@@ -390,6 +391,7 @@ const ACTION_REJECT_MESSAGES = {
   'insufficient-influence': 'Not enough Influence.',
   'insufficient-money': 'Not enough Money.',
   'insufficient-funds': 'You no longer have enough to make that offer.',
+  'already-owned': 'You already own that Political Asset.',
 };
 
 let hasEnteredMatchScreen = false;
@@ -548,6 +550,7 @@ function renderActionPanel(snapshot) {
   // Raid isn't tied to rank progression the way Sabotaj/Politik are, so
   // it's available to a President too - only turn-gated.
   $('#btn-action-raid').disabled = !isMyTurn || votingOpen;
+  $('#btn-action-market').disabled = !isMyTurn || votingOpen;
 
   const skipBtn = $('#btn-host-skip');
   skipBtn.hidden = !snapshot.isHost;
@@ -566,6 +569,30 @@ function renderActionPanel(snapshot) {
   }
 
   renderPoliticalNetwork(localPlayer);
+  renderSecretObjective(localPlayer);
+}
+
+// Secret Objective data only ever appears on the local player's own entry
+// (see match.js's maskPlayersFor, which strips it exactly like
+// politicalNetwork/hasKabel) - this panel is never rendered for anyone
+// else's data, by construction.
+function renderSecretObjective(localPlayer) {
+  const panel = $('#secret-objective-panel');
+  if (!localPlayer || !localPlayer.secretObjective) {
+    panel.hidden = true;
+    return;
+  }
+  const definition = SECRET_OBJECTIVES.find((o) => o.id === localPlayer.secretObjective.id);
+  if (!definition) {
+    panel.hidden = true;
+    return;
+  }
+  panel.hidden = false;
+  $('#secret-objective-description').textContent = definition.description;
+  const statusEl = $('#secret-objective-status');
+  const completed = localPlayer.secretObjective.completed;
+  statusEl.textContent = completed ? '✅ Selesai' : 'Belum selesai';
+  statusEl.classList.toggle('is-complete', completed);
 }
 
 // Political Network progress and KABEL ownership only ever appear on the
@@ -655,9 +682,40 @@ function openOffersModal(action, offers) {
   const snapshot = match.getMatchSnapshot();
   const localPlayer = findLocalPlayer(snapshot);
 
-  $('#picker-title').textContent = action === 'projek' ? 'Pilih Projek' : 'Pilih Kempen Imej';
+  $('#picker-title').textContent = action === 'projek' ? 'Pilih Projek' : action === 'market' ? 'Black Market' : 'Pilih Kempen Imej';
   const container = $('#picker-cards');
   container.innerHTML = '';
+
+  // Black Market offers are plain asset-type strings, not card objects -
+  // a distinct enough shape that it gets its own short branch rather than
+  // threading a third case through the projek/media logic below.
+  if (action === 'market') {
+    offers.forEach((assetType) => {
+      const def = opportunities.OPPORTUNITY_DEFINITIONS[assetType];
+      const price = GAME_BALANCE.blackMarket.price;
+      const btn = document.createElement('button');
+      btn.className = 'picker-card-item';
+      btn.type = 'button';
+
+      const name = document.createElement('div');
+      name.className = 'picker-card-name';
+      name.textContent = `${def.icon} ${def.name}`;
+      btn.appendChild(name);
+      btn.appendChild(makeCardLine(def.description(), true));
+      btn.appendChild(makeCardLine(`${MONEY_ICON} Cost: ${formatMoney(price)}`, false));
+      btn.disabled = localPlayer.money < price;
+
+      btn.addEventListener('click', () => {
+        sound.playClick();
+        $('#action-picker-modal').hidden = true;
+        match.chooseMarketAsset(assetType);
+      });
+
+      container.appendChild(btn);
+    });
+    $('#action-picker-modal').hidden = false;
+    return;
+  }
 
   offers.forEach((card) => {
     const btn = document.createElement('button');
@@ -1042,7 +1100,7 @@ function handleActionFeedback(snapshot) {
 function makeStatsGrid(player) {
   const grid = document.createElement('div');
   grid.className = 'match-end-stats-grid';
-  [
+  const rows = [
     ['Money', formatMoney(player.money)],
     ['Influence', String(player.influence)],
     ['Scandal', `${player.scandal}%`],
@@ -1051,7 +1109,14 @@ function makeStatsGrid(player) {
     ['Sabotages', String(player.stats.sabotagesSucceeded)],
     ['Media Used', String(player.stats.mediaCardsUsed)],
     ['Turns', String(player.stats.turnsPlayed)],
-  ].forEach(([label, value]) => {
+  ];
+  // Only ever present on the local player's own card - secretObjective is
+  // masked out of everyone else's data (see match.js's maskPlayersFor).
+  if (player.secretObjective) {
+    const definition = SECRET_OBJECTIVES.find((o) => o.id === player.secretObjective.id);
+    if (definition) rows.push(['Secret Objective', `${definition.name}${player.secretObjective.completed ? ' ✅' : ''}`]);
+  }
+  rows.forEach(([label, value]) => {
     const item = document.createElement('div');
     item.className = 'match-end-stat-item';
     const labelEl = document.createElement('span');
@@ -1255,6 +1320,18 @@ function wireMatchActions() {
     openTargetPicker({ mode: 'raid' });
   });
 
+  $('#btn-action-market').addEventListener('click', () => {
+    sound.playClick();
+    const snapshot = match.getMatchSnapshot();
+    const localPlayer = findLocalPlayer(snapshot);
+    const ownedTypes = new Set((localPlayer.assets || []).map((a) => a.type));
+    if (opportunities.ASSET_TYPES.every((type) => ownedTypes.has(type))) {
+      showToast('You already own every Political Asset.');
+      return;
+    }
+    match.requestMarketOffers();
+  });
+
   // Backroom Deal is never turn-gated - available any time to any player.
   $('#btn-backroom-deal').addEventListener('click', () => {
     sound.playClick();
@@ -1422,6 +1499,15 @@ function wireMatchEvents() {
     }
     showToast(message, 4500);
     if (accepted && !leaked) sound.playCoins(); else if (leaked) sound.playWarning(); else sound.playClick();
+  });
+
+  bus.on('match:objective-complete', (e) => {
+    const { name, reward } = e.detail;
+    const parts = [];
+    if (reward?.money) parts.push(formatMoney(reward.money));
+    if (reward?.influence) parts.push(`${reward.influence} Influence`);
+    showToast(`🎯 Objective Complete: ${name}! +${parts.join(' + ')}`, 5000);
+    sound.playPromotion();
   });
 }
 

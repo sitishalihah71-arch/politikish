@@ -23,9 +23,10 @@ import { generateMediaOffers, resolveMedia } from './media.js';
 import { resolvePolitik } from './politics.js';
 import { resolveSabotaj } from './sabotage.js';
 import { pickNationalEvent, applyNationalEvent } from './events.js';
-import { dealStartingAssets, hasAsset, resolveRaid } from './politicalOpportunities.js';
+import { dealStartingAssets, hasAsset, resolveRaid, generateMarketOffers, buyAsset } from './politicalOpportunities.js';
 import { proposeDeal, respondToDeal, resetDeals } from './backroomDeals.js';
 import { PARLIAMENT_MOTIONS, pickMotion, applyMotion } from './parliament.js';
+import { assignSecretObjective, checkSecretObjective } from './objectives.js';
 import { GAME_BALANCE } from './balance.js';
 
 let matchStarted = false;
@@ -95,7 +96,7 @@ function getActivePlayer(players) {
 function maskPlayersFor(players, viewerId) {
   return players.map((p) => {
     if (p.id === viewerId) return { ...p };
-    const { politicalNetwork, hasKabel, ...rest } = p;
+    const { politicalNetwork, hasKabel, secretObjective, ...rest } = p;
     return rest;
   });
 }
@@ -299,6 +300,7 @@ function advanceTurn({ skipSupportTick = false } = {}) {
   if (endingPlayer) {
     if (!skipSupportTick) tickPublicSupport(endingPlayer);
     endingPlayer.stats.turnsPlayed += 1;
+    maybeCompleteObjective(endingPlayer);
   }
   lastPenalized = players.filter((p) => applyScandalPenalty(p, players)).map((p) => p.id);
 
@@ -404,6 +406,19 @@ function maybeRollKabelUnlock(player, category) {
   if (Math.random() < GAME_BALANCE.politicalNetwork.unlockChancePercent / 100) {
     kabelClaimed = true;
     player.hasKabel = true;
+  }
+}
+
+// Checks (and, if newly met, applies + announces) a player's Secret
+// Objective. Called after every turn-ending action and after a clean
+// Backroom Deal transfer - the only two places a player's Money/Influence
+// change mid-match. Privately notifies just that player (never broadcast,
+// same privacy boundary as Backroom Deals) so the objective and its
+// completion stay masked from everyone else per maskPlayersFor.
+function maybeCompleteObjective(player) {
+  const definition = checkSecretObjective(player);
+  if (definition) {
+    notifyPlayer(player.id, 'objective-complete', { name: definition.name, reward: definition.reward });
   }
 }
 
@@ -516,6 +531,29 @@ function hostResolveRaid(playerId, targetId, assetId, extraInfluence, respond) {
   advanceTurn();
 }
 
+// Card-generation step for Black Market, mirroring requestProjekOffers -
+// offers are generated fresh each time (not stored), so backing out of the
+// modal costs nothing.
+function hostResolveMarketOffers(playerId, respond) {
+  if (!isActivePlayerId(playerId)) return;
+  const player = room.getPlayersLive().find((p) => p.id === playerId);
+  if (!player) return;
+  respond({ type: 'market-offers', payload: { offers: generateMarketOffers(player) } });
+}
+
+function hostResolveMarketPurchase(playerId, assetType, respond) {
+  if (!isActivePlayerId(playerId)) return;
+  const player = room.getPlayersLive().find((p) => p.id === playerId);
+  if (!player) return;
+  const result = buyAsset(player, assetType);
+  if (!result.ok) {
+    respond({ type: 'action-rejected', payload: { reason: result.reason } });
+    return;
+  }
+  setLastAction({ type: 'market', actorId: playerId, assetType: result.assetType, price: result.price });
+  advanceTurn();
+}
+
 // Delivers a message to exactly one player, whether that's a remote client
 // (over their own connection) or the host's own local screen (via bus,
 // since the host never sends itself network messages) - used for Backroom
@@ -561,14 +599,21 @@ function hostRespondToDeal(responderId, dealId, accept) {
     return;
   }
 
+  const offerer = players.find((p) => p.id === result.offererId);
+  const target = players.find((p) => p.id === result.targetId);
+
   if (result.leaked) {
-    const offerer = players.find((p) => p.id === result.offererId);
-    const target = players.find((p) => p.id === result.targetId);
     postNews({
       icon: '📰',
       headline: 'BREAKING NEWS',
       description: `A secret political deal between ${offerer?.name || 'a politician'} and ${target?.name || 'a politician'} was exposed! Both lose their next turn.`,
     });
+  } else {
+    // A clean transfer is the one place a player's Money/Influence can
+    // change outside their own turn - check both parties' Secret
+    // Objectives here too, not just in advanceTurn().
+    if (offerer) maybeCompleteObjective(offerer);
+    if (target) maybeCompleteObjective(target);
   }
 
   // Deliberately no setLastAction here - deals never generate the usual
@@ -607,6 +652,12 @@ function handleHostMatchMessage(type, payload, conn) {
   } else if (type === 'raid-attempt') {
     if (!isFromConn(conn)) return;
     hostResolveRaid(conn.peer, payload?.targetId, payload?.assetId, payload?.extraInfluence || 0, respond);
+  } else if (type === 'market-start') {
+    if (!isFromConn(conn)) return;
+    hostResolveMarketOffers(conn.peer, respond);
+  } else if (type === 'market-choice') {
+    if (!isFromConn(conn)) return;
+    hostResolveMarketPurchase(conn.peer, payload?.assetType, respond);
   } else if (type === 'deal-propose') {
     // Not turn-gated - any connected player can propose a bribe at any time.
     hostProposeDeal(conn.peer, payload?.targetId, payload?.money || 0, payload?.influence || 0, respond);
@@ -643,10 +694,14 @@ function handleClientMatchMessage(type, payload) {
     bus.emit('match:offers', { action: 'media', offers: payload.offers });
   } else if (type === 'sabotaj-options') {
     bus.emit('match:sabotaj-options', { isKabel: Boolean(payload.isKabel) });
+  } else if (type === 'market-offers') {
+    bus.emit('match:offers', { action: 'market', offers: payload.offers });
   } else if (type === 'deal-offer') {
     bus.emit('match:deal-offer', payload);
   } else if (type === 'deal-result') {
     bus.emit('match:deal-result', payload);
+  } else if (type === 'objective-complete') {
+    bus.emit('match:objective-complete', payload);
   } else if (type === 'action-rejected') {
     bus.emit('match:action-rejected', { reason: payload.reason });
   }
@@ -730,6 +785,25 @@ export function attemptRaid(targetId, assetId, extraInfluence) {
   }
 }
 
+export function requestMarketOffers() {
+  if (isHostRole()) {
+    const player = room.getPlayersLive().find((p) => p.id === room.getRoomSnapshot().localPlayerId);
+    bus.emit('match:offers', { action: 'market', offers: player ? generateMarketOffers(player) : [] });
+  } else {
+    multiplayer.send({ type: 'market-start' });
+  }
+}
+
+export function chooseMarketAsset(assetType) {
+  if (isHostRole()) {
+    hostResolveMarketPurchase(room.getRoomSnapshot().localPlayerId, assetType, (msg) => {
+      bus.emit('match:action-rejected', { reason: msg.payload.reason });
+    });
+  } else {
+    multiplayer.send({ type: 'market-choice', payload: { assetType } });
+  }
+}
+
 // Backroom Deals are never turn-gated - can be called any time, by anyone.
 export function proposeBackroomDeal(targetId, money, influence) {
   if (isHostRole()) {
@@ -791,6 +865,7 @@ bus.on('room:match-started', () => {
     const players = room.getPlayersLive();
     players.forEach(initMatchState);
     dealStartingAssets(players);
+    players.forEach(assignSecretObjective);
     currentRound = 1;
     const bySlot = [...players].sort((a, b) => a.slot - b.slot);
     turnSlot = (bySlot.find((p) => p.connected) || bySlot[0]).slot;
