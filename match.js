@@ -27,6 +27,7 @@ import { dealStartingAssets, hasAsset, resolveRaid, generateMarketOffers, buyAss
 import { proposeDeal, respondToDeal, resetDeals } from './backroomDeals.js';
 import { PARLIAMENT_MOTIONS, pickMotion, applyMotion } from './parliament.js';
 import { assignSecretObjective, checkSecretObjective } from './objectives.js';
+import { decideBotAction, decideDealProposal, decideDealResponse } from './bots.js';
 import { GAME_BALANCE } from './balance.js';
 
 let matchStarted = false;
@@ -376,6 +377,48 @@ function settleTurnState() {
   }
 
   broadcastMatchUpdate();
+  maybeTriggerBotTurn(newActive);
+}
+
+// A bot has no real PeerJS connection to send it a turn over - the host
+// just calls its own resolvers directly after a pacing delay, the same
+// deferred-setTimeout pattern already used above for the bribery-leak
+// auto-skip, so a human opponent visibly sees the bot "take" its turn
+// instead of it resolving instantly.
+function maybeTriggerBotTurn(active) {
+  if (active && active.isBot) {
+    setTimeout(() => resolveBotTurn(active.id), GAME_BALANCE.bots.turnDelayMs);
+  }
+}
+
+// Bots skip the offer round-trip protocol entirely (that's a network
+// artifact for remote clients) - it generates the same offer pools the UI
+// would have requested, decides directly via bots.js, then calls the exact
+// same hostResolveX a real client's message would have driven. A deal
+// proposal never consumes the turn (see the comment on hostProposeDeal
+// below), so a bot may propose one and still take a normal action after.
+function resolveBotTurn(botId) {
+  const players = room.getPlayersLive();
+  const bot = players.find((p) => p.id === botId);
+  if (!bot || !isActivePlayerId(botId)) return;
+
+  const proposal = decideDealProposal(bot, players);
+  if (proposal) hostProposeDeal(bot.id, proposal.targetId, proposal.money, proposal.influence, () => {});
+
+  const offers = {
+    projekOffers: generateProjectOffers(),
+    mediaOffers: generateMediaOffers(),
+    marketOffers: generateMarketOffers(bot),
+  };
+  const action = decideBotAction(bot, players, offers);
+  const noop = () => {};
+
+  if (action.type === 'projek') hostResolveProjek(botId, action.cardId);
+  else if (action.type === 'politik') hostResolvePolitik(botId, action.extraInfluence, noop);
+  else if (action.type === 'sabotaj') hostResolveSabotaj(botId, action.targetId, action.extraInfluence, noop);
+  else if (action.type === 'media') hostResolveMedia(botId, action.cardId, action.targetId);
+  else if (action.type === 'raid') hostResolveRaid(botId, action.targetId, action.assetId, action.extraInfluence, noop);
+  else if (action.type === 'market') hostResolveMarketPurchase(botId, action.assetType, noop);
 }
 
 // A pending vote pauses every turn-gated action for the whole table, not
@@ -580,6 +623,15 @@ function hostProposeDeal(offererId, targetId, money, influence, respond) {
     respond({ type: 'action-rejected', payload: { reason: result.reason } });
     return;
   }
+  // A bot target has no connection/local screen for notifyPlayer to reach -
+  // it never "receives" the offer through the normal channel, so its
+  // accept/reject decision is driven directly instead.
+  if (target.isBot) {
+    const accept = decideDealResponse(target, { money: result.money, influence: result.influence });
+    hostRespondToDeal(target.id, result.dealId, accept);
+    return;
+  }
+
   notifyPlayer(targetId, 'deal-offer', {
     dealId: result.dealId,
     fromId: offererId,
@@ -871,6 +923,7 @@ bus.on('room:match-started', () => {
     turnSlot = (bySlot.find((p) => p.connected) || bySlot[0]).slot;
     multiplayer.onMessage(handleHostMatchMessage);
     broadcastMatchUpdate();
+    maybeTriggerBotTurn(getActivePlayer(players));
   } else {
     multiplayer.onMessage(handleClientMatchMessage);
   }

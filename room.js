@@ -2,9 +2,9 @@
 // and reconnect-by-name within a grace window. Pure logic - `ui.js` renders
 // whatever this module broadcasts via `bus`.
 
-import { bus, generateRoomCode, saveSession, clearSession } from './utils.js';
+import { bus, generateRoomCode, saveSession, clearSession, randomChoice, randomInt } from './utils.js';
 import { createPlayer } from './player.js';
-import { normalizeAvatar } from './avatar.js';
+import { normalizeAvatar, HAIR_STYLES, FACE_STYLES } from './avatar.js';
 import { GAME_BALANCE } from './balance.js';
 import * as multiplayer from './multiplayer.js';
 
@@ -299,6 +299,35 @@ export function updateSettings(partial) {
 
 export function canStartMatch() {
   return players.length === gameSettings.maxPlayers && players.every((p) => p.connected && p.ready);
+}
+
+// Host-only: fills the next open slot with an AI-controlled player. Unlike
+// a real join, there's no handshake to wait on - a bot is connected and
+// ready from the instant it exists, so it needs zero further changes to
+// canStartMatch() or any of the target-picker filters that already gate on
+// `connected`.
+export function addBot() {
+  if (role !== 'host' || players.length >= gameSettings.maxPlayers) return;
+  const slot = nextAvailableSlot();
+  if (slot === null) return;
+  const name = dedupeName(randomChoice(GAME_BALANCE.bots.namePool));
+  const player = createPlayer({ id: `bot-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, slot, name, isHost: false, isBot: true });
+  player.ready = true;
+  player.avatar = normalizeAvatar({ hair: randomInt(0, HAIR_STYLES.length - 1), face: randomInt(0, FACE_STYLES.length - 1) });
+  players.push(player);
+  broadcastRoomUpdate();
+  bus.emit('room:updated', getRoomSnapshot());
+}
+
+// Host-only, pre-match cleanup for a bot added by mistake - matches don't
+// call this (no way to remove a bot mid-match, same as a real player).
+export function removeBot(botId) {
+  if (role !== 'host') return;
+  const player = players.find((p) => p.id === botId && p.isBot);
+  if (!player) return;
+  players = players.filter((p) => p.id !== botId);
+  broadcastRoomUpdate();
+  bus.emit('room:updated', getRoomSnapshot());
 }
 
 export function startMatch() {

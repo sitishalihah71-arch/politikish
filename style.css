@@ -518,6 +518,28 @@ button {
   background: var(--green);
 }
 
+#btn-lobby-add-bot[hidden] {
+  display: none;
+}
+
+.lobby-bot-remove {
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 50%;
+  background: var(--bg-card-raised);
+  color: var(--text-secondary);
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.lobby-bot-remove:hover {
+  color: var(--text-primary);
+  border-color: var(--text-secondary);
+}
+
 .lobby-controls {
   display: flex;
   flex-direction: column;

@@ -268,6 +268,12 @@ function renderLobby(snapshot) {
         tag.textContent = 'Host';
         nameEl.appendChild(tag);
       }
+      if (player.isBot) {
+        const tag = document.createElement('span');
+        tag.className = 'player-tag';
+        tag.textContent = 'Bot';
+        nameEl.appendChild(tag);
+      }
       info.appendChild(nameEl);
       if (!player.connected) {
         const status = document.createElement('span');
@@ -281,6 +287,19 @@ function renderLobby(snapshot) {
       badge.className = `lobby-ready-badge${player.ready ? ' is-ready' : ''}`;
       badge.textContent = player.ready ? 'Ready' : 'Not Ready';
       li.appendChild(badge);
+
+      if (player.isBot && snapshot.isHost) {
+        const removeBtn = document.createElement('button');
+        removeBtn.type = 'button';
+        removeBtn.className = 'lobby-bot-remove';
+        removeBtn.setAttribute('aria-label', `Remove ${player.name}`);
+        removeBtn.textContent = '×';
+        removeBtn.addEventListener('click', () => {
+          sound.playClick();
+          room.removeBot(player.id);
+        });
+        li.appendChild(removeBtn);
+      }
 
       listEl.appendChild(li);
     });
@@ -306,6 +325,7 @@ function renderLobby(snapshot) {
     $('#lobby-start-hint').textContent = canStart
       ? 'Ready to start!'
       : `Need ${snapshot.settings.maxPlayers} players, all ready (${snapshot.players.length}/${snapshot.settings.maxPlayers})…`;
+    $('#btn-lobby-add-bot').hidden = snapshot.players.length >= snapshot.settings.maxPlayers;
   }
 }
 
@@ -337,6 +357,11 @@ function wireLobbyScreen() {
 
   $('#btn-lobby-start').addEventListener('click', () => {
     room.startMatch();
+  });
+
+  $('#btn-lobby-add-bot').addEventListener('click', () => {
+    sound.playClick();
+    room.addBot();
   });
 
   $('#setting-lobby-players').addEventListener('change', (e) => {

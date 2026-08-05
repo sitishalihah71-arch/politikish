@@ -2,12 +2,13 @@
 
 import { GAME_BALANCE } from './balance.js';
 
-export function createPlayer({ id, slot, name, isHost }) {
+export function createPlayer({ id, slot, name, isHost, isBot = false }) {
   return {
     id,
     slot,
     name,
     isHost,
+    isBot,
     connected: true,
     avatar: { hair: 0, face: 0 },
     ready: false,

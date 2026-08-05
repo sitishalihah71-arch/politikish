@@ -168,4 +168,27 @@ export const GAME_BALANCE = {
     price: 8000,
     offerCount: 3,
   },
+
+  // Bot players: AI-controlled seats so a single human can fill a match.
+  // Every bot turn is resolved host-side through the exact same resolvers
+  // real actions use - this section only tunes pacing and the weighted
+  // random-but-valid decision policy (see bots.js).
+  bots: {
+    namePool: [
+      'Ahmad', 'Ramli', 'Zarina', 'Farid', 'Halim', 'Ita',
+      'Rosnah', 'Zulkifli', 'Salmah', 'Hafiz', 'Mazlan', 'Aina',
+    ],
+    turnDelayMs: 1600,
+    actionWeights: {
+      projek: 30,
+      politik: 20,
+      sabotaj: 15,
+      media: 15,
+      raid: 10,
+      market: 10,
+      dealPropose: 8,
+    },
+    dealOfferPercent: 20,
+    dealAcceptMinValue: 300,
+  },
 };
