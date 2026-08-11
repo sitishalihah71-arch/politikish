@@ -130,7 +130,10 @@
           <span class="field-label">Room Code</span>
           <div id="lobby-code" class="room-code-text lobby-code">------</div>
         </div>
-        <button id="btn-lobby-leave" class="link-back lobby-leave-link" type="button">Leave</button>
+        <div class="lobby-header-actions">
+          <button id="btn-lobby-help" class="link-back lobby-header-link" type="button">How to Play</button>
+          <button id="btn-lobby-leave" class="link-back lobby-header-link" type="button">Leave</button>
+        </div>
       </div>
 
       <div class="lobby-settings-summary">
@@ -449,6 +452,138 @@
         <button id="btn-deal-accept" class="menu-btn menu-btn-primary" type="button">
           <span class="menu-btn-label">Accept</span>
         </button>
+      </div>
+    </div>
+  </div>
+
+  <div id="howto-modal" class="modal-overlay" hidden>
+    <div class="modal-card howto-card" role="dialog" aria-modal="true" aria-labelledby="howto-title">
+      <div class="modal-header">
+        <h2 id="howto-title">How to Play</h2>
+        <button id="btn-close-howto" class="icon-btn icon-btn-small" type="button" aria-label="Close how to play">
+          <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+        </button>
+      </div>
+      <div class="modal-body howto-body">
+
+        <section class="howto-section">
+          <span class="howto-eyebrow">01 · Getting In</span>
+          <h3>Quick Start</h3>
+          <ol class="howto-steps">
+            <li><div><strong>Create or join a room</strong><p>The host taps <b>Create Room</b> and shares the 5-letter room code. Everyone else taps <b>Join Room</b> and enters it.</p></div></li>
+            <li><div><strong>Customize your stickman</strong><p>Pick a hair and face, or hit <b>Random</b>. Purely cosmetic.</p></div></li>
+            <li><div><strong>Get to 2–6 players, all Ready</strong><p>Not enough humans? The host can hit <b>Add Bot</b> to fill empty seats with AI players.</p></div></li>
+            <li><div><strong>Host hits Start Match</strong><p>Turns rotate seat by seat. On your turn, pick exactly one move.</p></div></li>
+          </ol>
+        </section>
+
+        <section class="howto-section">
+          <span class="howto-eyebrow">02 · The Goal</span>
+          <h3>The Political Ladder</h3>
+          <p class="howto-lede">Four ranks, climbing bottom to top. Seat counts scale with table size — President is always exactly one seat.</p>
+          <div class="howto-ladder">
+            <div class="howto-rank" data-rank="ahli"><span class="howto-rank-chip">Ahli Biasa<span>Ordinary Member</span></span><span class="howto-rank-desc">Everyone starts here.</span></div>
+            <div class="howto-ladder-arrow">↑ promote or seize the seat above ↑</div>
+            <div class="howto-rank" data-rank="ketua"><span class="howto-rank-chip">Ketua ADUN<span>District Chief</span></span><span class="howto-rank-desc">First rung up.</span></div>
+            <div class="howto-ladder-arrow">↑</div>
+            <div class="howto-rank" data-rank="deputy"><span class="howto-rank-chip">Timbalan Presiden<span>Deputy President</span></span><span class="howto-rank-desc">Fewer seats, higher stakes.</span></div>
+            <div class="howto-ladder-arrow">↑</div>
+            <div class="howto-rank" data-rank="president"><span class="howto-rank-chip">Presiden<span>President</span></span><span class="howto-rank-desc">The top. Always exactly one seat.</span></div>
+          </div>
+        </section>
+
+        <section class="howto-section">
+          <span class="howto-eyebrow">03 · Your Numbers</span>
+          <h3>Reading Your Stats</h3>
+          <div class="howto-stat-grid">
+            <div class="howto-stat-card"><div class="howto-stat-head"><span>💰</span><b>Money (Duit)</b></div><p>Spent on Kempen Imej and Black Market. Earned mainly from Projek. Lose 50% instantly if Scandal maxes out.</p></div>
+            <div class="howto-stat-card"><div class="howto-stat-head"><span>⭐</span><b>Influence</b></div><p>Spent on Politik, Sabotaj, and Political Raid. Also earned from Projek.</p></div>
+            <div class="howto-stat-card"><div class="howto-stat-head"><span>👍</span><b>Approval Rating</b></div><p>Public standing, starts at 50%. Decides who Parliament can target with a Vote of No Confidence.</p></div>
+            <div class="howto-stat-card howto-stat-wide"><div class="howto-stat-head"><span>⚠️</span><b>Scandal</b></div>
+              <div class="howto-scandal-track"><span></span><span></span><span></span><span></span></div>
+              <div class="howto-scandal-labels"><span>Bersih 0%</span><span>Diperhati 30%</span><span>Disiasat 60%</span><span>Ditahan 100%</span></div>
+              <div class="howto-warn">At 100%: lose 50% of your Money, drop one rank, and Scandal resets to 30%.</div>
+            </div>
+          </div>
+        </section>
+
+        <section class="howto-section">
+          <span class="howto-eyebrow">04 · On Your Turn</span>
+          <h3>Your Six Moves</h3>
+          <p class="howto-lede">Pick exactly one per turn. Colors match the buttons you'll see in-game.</p>
+          <div class="howto-action-grid">
+            <div class="howto-action projek"><div class="howto-action-name">Projek</div><p>Dapatkan duit dan influence, tapi risiko skandal naik. Always succeeds.</p><div class="howto-tags"><span>no cost</span><span>+💰 +⭐</span><span>+⚠️ scandal</span></div></div>
+            <div class="howto-action politik"><div class="howto-action-name">Politik</div><p>Guna influence untuk naik pangkat. Promotes into an EMPTY seat one rank up.</p><div class="howto-tags"><span>costs ⭐</span><span>needs open seat</span><span>% chance</span></div></div>
+            <div class="howto-action sabotaj"><div class="howto-action-name">Sabotaj</div><p>Serang pemain lain untuk jatuhkan mereka. Steals an OCCUPIED seat one rank up.</p><div class="howto-tags"><span>costs ⭐</span><span>needs full seat</span><span>% chance</span></div></div>
+            <div class="howto-action media"><div class="howto-action-name">Kempen Imej</div><p>Bayar media untuk kurangkan skandal anda. Or gain Influence / Public Support.</p><div class="howto-tags"><span>costs 💰</span><span>−⚠️ scandal</span></div></div>
+            <div class="howto-action raid"><div class="howto-action-name">Political Raid</div><p>Cuba rampas Aset Politik pemain lain. Risky bid to steal a rival's asset.</p><div class="howto-tags"><span>costs ⭐</span><span>% chance</span><span>steals asset</span></div></div>
+            <div class="howto-action market"><div class="howto-action-name">Black Market</div><p>Beli Aset Politik terus dengan duit. Guaranteed, no risk.</p><div class="howto-tags"><span>costs 💰</span><span>guaranteed</span></div></div>
+          </div>
+        </section>
+
+        <section class="howto-section">
+          <span class="howto-eyebrow">05 · Anytime, Not Just Your Turn</span>
+          <h3>🤝 Backroom Deal</h3>
+          <p>Either player can offer or answer a Backroom Deal at <b>any time</b> — Money and/or Influence, only the two of you ever see it. Every deal carries a leak risk that scales with how scandalous either of you already is; leak, and the transfer is cancelled and both of you lose your next turn instead. Stay clean, and it moves quietly with no public trace.</p>
+        </section>
+
+        <section class="howto-section">
+          <span class="howto-eyebrow">06 · Public &amp; Stealable</span>
+          <h3>Political Assets</h3>
+          <p class="howto-lede">Permanent passive bonuses, visible to the whole table on purpose. Get one from the starting deal, Political Raid, or Black Market.</p>
+          <div class="howto-asset-list">
+            <div class="howto-asset-row"><span>📺</span><b>Media Empire</b><span>Passive Influence every round.</span></div>
+            <div class="howto-asset-row"><span>🏦</span><b>Corporate Sponsor</b><span>Extra Money from every Projek.</span></div>
+            <div class="howto-asset-row"><span>⚙️</span><b>Party Machinery</b><span>Higher Politik success chance.</span></div>
+            <div class="howto-asset-row"><span>👑</span><b>Royal Connection</b><span>Lower chance of being Sabotaj'd or Kabel'd.</span></div>
+          </div>
+        </section>
+
+        <section class="howto-section">
+          <span class="howto-eyebrow">07 · Symbols You'll See</span>
+          <h3>Badges &amp; Special Icons</h3>
+          <div class="howto-badge-grid">
+            <div class="howto-badge-row"><span class="howto-badge">HOST</span><div><b>Host tag</b><p>Controls settings and Start Match / can skip a stalled turn.</p></div></div>
+            <div class="howto-badge-row"><span class="howto-badge">BOT</span><div><b>Bot tag</b><p>AI-controlled seat. Plays automatically on a short delay.</p></div></div>
+            <div class="howto-badge-row"><span class="howto-badge howto-badge-shield">🛡️2</span><div><b>Public Support</b><p>Temporary shield from Kempen Imej. Number = turns left.</p></div></div>
+            <div class="howto-badge-row"><span class="howto-badge howto-badge-icon">🕴️</span><div><b>KABEL</b><p>Secret legendary card. One-time use: challenge any occupied seat above you.</p></div></div>
+            <div class="howto-badge-row"><span class="howto-badge howto-badge-icon">🎯</span><div><b>Secret Objective</b><p>Private goal with its own payout. Hidden from everyone else, even at match end.</p></div></div>
+            <div class="howto-badge-row"><span class="howto-badge howto-badge-icon">🏛️</span><div><b>Parliament Voting</b><p>Full-table Yes/No vote fires periodically. No vote = counted as "No".</p></div></div>
+          </div>
+        </section>
+
+        <section class="howto-section">
+          <span class="howto-eyebrow">08 · Out of Anyone's Control</span>
+          <h3>National Events</h3>
+          <p class="howto-lede">Random world events fire on a timer if the host leaves them on. They hit every player equally.</p>
+          <div class="howto-event-strip">
+            <div class="howto-event-chip"><span>📈</span>Economic Boom</div>
+            <div class="howto-event-chip"><span>📉</span>Recession</div>
+            <div class="howto-event-chip"><span>❤️</span>Public Holiday</div>
+            <div class="howto-event-chip"><span>🚨</span>Anti-Corruption</div>
+            <div class="howto-event-chip"><span>🗳️</span>Election Season</div>
+            <div class="howto-event-chip"><span>📺</span>Media Frenzy</div>
+            <div class="howto-event-chip"><span>💸</span>Gov. Budget</div>
+            <div class="howto-event-chip"><span>⚡</span>Parliament Crisis</div>
+          </div>
+        </section>
+
+        <section class="howto-section howto-bot-note">
+          <span class="howto-eyebrow">09 · Playing Solo</span>
+          <h3>Playing with Bots</h3>
+          <ul>
+            <li>In the lobby, the host taps <b>Add Bot</b> once per open seat — each click adds one, tagged <b>BOT</b>. A ✕ next to a bot removes it before the match starts.</li>
+            <li>Bots take real turns — Projek, Politik, Sabotaj, Kempen Imej, Political Raid, Black Market — on a short visible delay.</li>
+            <li>They'll send you Backroom Deal offers unprompted, and accept or reject offers you send them based on how good the offer is.</li>
+            <li>Bots never cast a Parliament vote — same rule as any silent human: it counts as a "No".</li>
+          </ul>
+        </section>
+
+        <section class="howto-section howto-win">
+          <span class="howto-eyebrow">Match End</span>
+          <p><b>Whoever holds the highest rank when the final round ends, wins.</b> Ties break by lowest Scandal, then by seat order.</p>
+        </section>
+
       </div>
     </div>
   </div>

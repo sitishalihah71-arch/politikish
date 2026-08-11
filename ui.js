@@ -1566,6 +1566,30 @@ function wireSettingsModal() {
   });
 }
 
+// Read-only reference content - no game state involved, so it's just a
+// modal any player (host or guest) can open/close from the lobby, mirroring
+// wireSettingsModal()'s open/close/backdrop/Escape pattern exactly.
+function wireHowtoModal() {
+  const modal = $('#howto-modal');
+
+  $('#btn-lobby-help').addEventListener('click', () => {
+    sound.playClick();
+    modal.hidden = false;
+  });
+
+  $('#btn-close-howto').addEventListener('click', () => {
+    modal.hidden = true;
+  });
+
+  modal.addEventListener('click', (e) => {
+    if (e.target === modal) modal.hidden = true;
+  });
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && !modal.hidden) modal.hidden = true;
+  });
+}
+
 export function getSettings() {
   return { ...settings };
 }
@@ -1573,6 +1597,7 @@ export function getSettings() {
 export function initUI() {
   wireMainMenu();
   wireSettingsModal();
+  wireHowtoModal();
   wireRoomHostScreen();
   wireRoomJoinScreen();
   wireCustomizeScreen();
