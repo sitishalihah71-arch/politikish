@@ -22,6 +22,8 @@ export function showScreen(screenName) {
   $$('.screen').forEach((el) => {
     el.classList.toggle('is-active', el.dataset.screen === screenName);
   });
+  // Lets CSS restyle things that live outside the screen (the corner icons).
+  document.body.dataset.screen = screenName;
   bus.emit('ui:screen-changed', { screen: screenName });
 }
 
@@ -243,6 +245,8 @@ function renderLobby(snapshot) {
   eventsBadge.textContent = `Events: ${snapshot.settings.nationalEvents ? 'ON' : 'OFF'}`;
   eventsBadge.classList.toggle('is-on', snapshot.settings.nationalEvents);
 
+  $('#lobby-count').textContent = `${snapshot.players.length} / ${snapshot.settings.maxPlayers}`;
+
   const listEl = $('#lobby-player-list');
   listEl.innerHTML = '';
   snapshot.players
@@ -270,7 +274,7 @@ function renderLobby(snapshot) {
       }
       if (player.isBot) {
         const tag = document.createElement('span');
-        tag.className = 'player-tag';
+        tag.className = 'player-tag player-tag-bot';
         tag.textContent = 'Bot';
         nameEl.appendChild(tag);
       }
@@ -437,6 +441,15 @@ function makeCardLine(text, positive) {
   return div;
 }
 
+const RANK_SHORT_LABELS = { ahli: 'AHLI', ketua: 'KETUA', deputy: 'TIMBALAN', president: 'PRESIDEN' };
+
+function makeTag(text, className) {
+  const tag = document.createElement('span');
+  tag.className = `mtag ${className}`;
+  tag.textContent = text;
+  return tag;
+}
+
 function renderMatchPlayerList(snapshot) {
   const listEl = $('#match-player-list');
   listEl.innerHTML = '';
@@ -446,25 +459,24 @@ function renderMatchPlayerList(snapshot) {
     .forEach((player) => {
       const card = document.createElement('div');
       card.className = 'match-player-card';
+      card.dataset.rank = player.rank;
       if (player.id === snapshot.activePlayerId) card.classList.add('is-active-turn');
       if (!player.connected) card.classList.add('is-disconnected');
 
-      const badge = document.createElement('div');
-      badge.className = 'player-card-badge';
-      badge.style.background = SLOT_BADGE_COLORS[player.slot - 1] || 'var(--gold)';
-      badge.textContent = String(player.slot);
-      card.appendChild(badge);
-
       const avatar = document.createElement('div');
       avatar.className = 'player-card-avatar';
-      avatar.innerHTML = renderAvatarSVG(player.avatar, 38);
+      avatar.innerHTML = renderAvatarSVG(player.avatar, 42);
       card.appendChild(avatar);
 
       const info = document.createElement('div');
       info.className = 'player-card-info';
       const name = document.createElement('div');
       name.className = 'player-card-name';
-      name.textContent = player.name;
+      const nameText = document.createElement('span');
+      nameText.textContent = player.name;
+      name.appendChild(nameText);
+      if (player.id === snapshot.localPlayerId) name.appendChild(makeTag('ANDA', 'mtag-you'));
+      if (player.isBot) name.appendChild(makeTag('BOT', 'mtag-bot'));
       appendPublicSupportBadge(name, player);
       appendAssetBadges(name, player);
       info.appendChild(name);
@@ -472,12 +484,31 @@ function renderMatchPlayerList(snapshot) {
       const stats = document.createElement('div');
       stats.className = 'player-card-stats';
       const scandalClass = player.scandal >= 60 ? ' stat-scandal-warn' : '';
-      stats.innerHTML = `<span>${formatMoney(player.money)}</span><span>${player.influence} Inf</span><span class="${scandalClass}">${player.scandal}%</span><span>👍${player.approval}%</span>`;
+      stats.innerHTML = `<span title="Duit">${formatMoney(player.money)}</span><span title="Influence">${player.influence} Inf</span><span class="${scandalClass}" title="Skandal">${player.scandal}%</span>`;
       info.appendChild(stats);
-
       card.appendChild(info);
+
+      const side = document.createElement('div');
+      side.className = 'player-card-side';
+      const chip = document.createElement('span');
+      chip.className = 'rank-chip';
+      chip.textContent = RANK_SHORT_LABELS[player.rank] || player.rank.toUpperCase();
+      side.appendChild(chip);
+      const support = document.createElement('span');
+      support.className = 'player-card-support';
+      support.textContent = `Sokongan ${player.approval}%`;
+      side.appendChild(support);
+      card.appendChild(side);
+
       listEl.appendChild(card);
     });
+}
+
+function makeSeatStamp(kind, text) {
+  const stamp = document.createElement('span');
+  stamp.className = `seat-stamp seat-stamp-${kind}`;
+  stamp.textContent = text;
+  return stamp;
 }
 
 function renderHierarchy(snapshot) {
@@ -494,8 +525,18 @@ function renderHierarchy(snapshot) {
   });
 
   const seatCapacity = getSeatCapacity(snapshot.players.length);
+  const localPlayer = findLocalPlayer(snapshot);
+  // The tier one rank above the local player is where Politik (empty seat)
+  // and Sabotaj (occupied seat) apply - mark it so the ladder shows what's
+  // within reach without having to read the action descriptions.
+  const targetRank = localPlayer ? getNextRank(localPlayer.rank) : null;
 
   RANKS.forEach((rank) => {
+    const isTargetTier = rank === targetRank;
+    const tierEl = $(`.hierarchy-tier[data-rank="${rank}"]`);
+    tierEl.classList.toggle('is-target', isTargetTier);
+    $('.tier-flag', tierEl).hidden = !isTargetTier;
+
     const container = $(`#seats-${rank}`);
     container.innerHTML = '';
     const occupants = snapshot.players.filter((p) => p.rank === rank).sort((a, b) => a.slot - b.slot);
@@ -504,6 +545,7 @@ function renderHierarchy(snapshot) {
 
     for (let i = 0; i < slotCount; i++) {
       const player = occupants[i];
+      const isYou = Boolean(player) && player.id === snapshot.localPlayerId;
       const wrap = document.createElement('div');
       wrap.className = 'hierarchy-seat-wrap';
 
@@ -512,14 +554,15 @@ function renderHierarchy(snapshot) {
       nameLabel.className = 'hierarchy-seat-name';
 
       if (player) {
-        seat.className = 'hierarchy-seat is-occupied';
+        seat.className = `hierarchy-seat is-occupied${isYou ? ' is-you' : ''}`;
         seat.dataset.rank = rank;
         seat.dataset.playerId = player.id;
-        seat.innerHTML = renderAvatarSVG(player.avatar, 56);
+        seat.innerHTML = renderAvatarSVG(player.avatar, 60);
         nameLabel.textContent = player.name;
       } else {
         seat.className = 'hierarchy-seat is-empty';
-        nameLabel.innerHTML = '&nbsp;';
+        wrap.classList.add('is-vacant');
+        nameLabel.textContent = 'Kosong';
       }
 
       // Asset badges are inline (a player can own several, so they can't
@@ -528,13 +571,18 @@ function renderHierarchy(snapshot) {
 
       wrap.appendChild(seat);
       wrap.appendChild(nameLabel);
+
+      if (isYou) wrap.appendChild(makeSeatStamp('you', 'ANDA'));
+      else if (isTargetTier && player) wrap.appendChild(makeSeatStamp('sabotaj', 'SABOTAJ'));
+      else if (isTargetTier) wrap.appendChild(makeSeatStamp('politik', 'POLITIK'));
+
       // Anchored to `wrap` (not the overflow-hidden avatar box) so the badge
       // never gets clipped by the seat's `overflow: hidden`.
       if (player) appendPublicSupportBadge(wrap, player, 'hierarchy-shield-badge');
       container.appendChild(wrap);
     }
 
-    $(`#count-${rank}`).textContent = `${occupants.length} / ${capacity}`;
+    $(`#count-${rank}`).textContent = `${occupants.length} / ${capacity} kerusi`;
   });
 
   $$('.hierarchy-seat[data-player-id]').forEach((el) => {
@@ -553,20 +601,62 @@ function renderHierarchy(snapshot) {
   });
 }
 
+function getScandalZone(pct) {
+  if (pct >= 100) return { key: 'arrested', label: 'Ditahan' };
+  if (pct >= 60) return { key: 'investigated', label: 'Disiasat' };
+  if (pct >= 30) return { key: 'watched', label: 'Diperhati' };
+  return { key: 'clean', label: 'Bersih' };
+}
+
+function renderStatusAssets(localPlayer) {
+  const container = $('#status-assets');
+  container.innerHTML = '';
+  const assets = (localPlayer && localPlayer.assets) || [];
+  if (!assets.length) {
+    const empty = document.createElement('div');
+    empty.className = 'asset-row';
+    empty.innerHTML = '<span>Tiada aset politik.</span>';
+    container.appendChild(empty);
+    return;
+  }
+  assets.forEach((asset) => {
+    const def = opportunities.OPPORTUNITY_DEFINITIONS[asset.type];
+    if (!def) return;
+    const row = document.createElement('div');
+    row.className = 'asset-row';
+    const name = document.createElement('b');
+    name.textContent = def.name;
+    const desc = document.createElement('span');
+    desc.textContent = def.description();
+    row.appendChild(name);
+    row.appendChild(desc);
+    container.appendChild(row);
+  });
+}
+
 function renderActionPanel(snapshot) {
   const localPlayer = findLocalPlayer(snapshot);
   const isMyTurn = snapshot.activePlayerId === snapshot.localPlayerId;
   const activePlayer = snapshot.players.find((p) => p.id === snapshot.activePlayerId);
-  const turnNameEl = $('#match-turn-name');
-  turnNameEl.textContent = activePlayer ? activePlayer.name : '-';
-  if (activePlayer) appendPublicSupportBadge(turnNameEl, activePlayer);
-
-  const isPresident = localPlayer && localPlayer.rank === 'president';
   // A pending vote pauses every turn-gated action host-side (see match.js's
   // isActivePlayerId) even for the player whose turn is technically queued
   // up next - the buttons must reflect that or they'd look clickable while
   // silently doing nothing.
   const votingOpen = Boolean(snapshot.pendingVote);
+
+  const turnNameEl = $('#match-turn-name');
+  turnNameEl.textContent = activePlayer ? activePlayer.name : '-';
+  turnNameEl.hidden = isMyTurn;
+  if (activePlayer && !isMyTurn) appendPublicSupportBadge(turnNameEl, activePlayer);
+  $('#match-turn-label').textContent = isMyTurn ? 'GILIRAN ANDA' : 'GILIRAN';
+  $('#match-turn-banner').classList.toggle('is-my-turn', isMyTurn && !votingOpen);
+  $('#match-turn-hint').textContent = votingOpen
+    ? 'Undian Parlimen sedang berlangsung.'
+    : isMyTurn
+      ? 'Pilih 1 tindakan di bawah.'
+      : activePlayer ? `Menunggu ${activePlayer.name}…` : '';
+
+  const isPresident = localPlayer && localPlayer.rank === 'president';
 
   $('#btn-action-projek').disabled = !isMyTurn || votingOpen;
   $('#btn-action-politik').disabled = !isMyTurn || isPresident || votingOpen;
@@ -584,15 +674,24 @@ function renderActionPanel(snapshot) {
   }
 
   if (localPlayer) {
+    $('#status-title').textContent = `Laporan ${localPlayer.name}`;
+    const rankChip = $('#status-rank');
+    rankChip.dataset.rank = localPlayer.rank;
+    rankChip.textContent = RANK_LABELS[localPlayer.rank].toUpperCase();
+
     const pct = localPlayer.scandal;
+    const zone = getScandalZone(pct);
     $('#match-scandal-pct').textContent = `${pct}%`;
-    $('#scandal-bar-fill').style.width = `${100 - pct}%`;
+    $('#match-scandal-zone').textContent = zone.label;
+    $('#scandal-bar').dataset.zone = zone.key;
+    $('#scandal-bar-fill').style.width = `${Math.min(100, pct)}%`;
 
     const approvalPct = localPlayer.approval;
     $('#match-approval-pct').textContent = `${approvalPct}%`;
     $('#approval-bar-fill').style.width = `${approvalPct}%`;
   }
 
+  renderStatusAssets(localPlayer);
   renderPoliticalNetwork(localPlayer);
   renderSecretObjective(localPlayer);
 }
@@ -616,7 +715,7 @@ function renderSecretObjective(localPlayer) {
   $('#secret-objective-description').textContent = definition.description;
   const statusEl = $('#secret-objective-status');
   const completed = localPlayer.secretObjective.completed;
-  statusEl.textContent = completed ? '✅ Selesai' : 'Belum selesai';
+  statusEl.textContent = completed ? 'Selesai' : 'Belum selesai';
   statusEl.classList.toggle('is-complete', completed);
 }
 
@@ -630,9 +729,13 @@ let hadKabel = false;
 function renderPoliticalNetwork(localPlayer) {
   if (!localPlayer || !localPlayer.politicalNetwork) return;
   const { politicalNetwork } = localPlayer;
-  $('#pn-infrastructure').textContent = `${politicalNetwork.infrastructure}/${POLITICAL_NETWORK_THRESHOLD}`;
-  $('#pn-publicServices').textContent = `${politicalNetwork.publicServices}/${POLITICAL_NETWORK_THRESHOLD}`;
-  $('#pn-administration').textContent = `${politicalNetwork.administration}/${POLITICAL_NETWORK_THRESHOLD}`;
+  ['infrastructure', 'publicServices', 'administration'].forEach((key) => {
+    const value = politicalNetwork[key];
+    $(`#pn-${key}`).textContent = `${value}/${POLITICAL_NETWORK_THRESHOLD}`;
+    $$(`.pn-track[data-pn="${key}"] i`).forEach((pip, index) => {
+      pip.classList.toggle('is-on', index < value);
+    });
+  });
 
   if (localPlayer.hasKabel && !hadKabel) {
     showToast('🕴️ Your political network paid off - you secretly hold KABEL!', 5000);
@@ -648,6 +751,8 @@ function renderBottomBar(snapshot) {
   $('#bottom-influence').textContent = String(localPlayer.influence);
   $('#bottom-scandal').textContent = `${localPlayer.scandal}%`;
   $('#bottom-rank').textContent = RANK_LABELS[localPlayer.rank];
+  $('#status-money').textContent = formatMoney(localPlayer.money);
+  $('#status-influence').textContent = String(localPlayer.influence);
 }
 
 const MONEY_ICON = '💰';
@@ -1109,12 +1214,18 @@ function handleActionFeedback(snapshot) {
     sound.playWarning();
   }
 
-  if (message) showToast(message, 4000);
+  if (message) {
+    showToast(message, 4000);
+    pushFeed(message, action.type, snapshot.round);
+  }
 
   if (snapshot.lastPenalized && snapshot.lastPenalized.length) {
     snapshot.lastPenalized.forEach((pid) => {
       const p = snapshot.players.find((pl) => pl.id === pid);
-      if (p) showToast(`${p.name} hit 100% Scandal — lost 50% money and dropped a rank.`, 4500);
+      if (!p) return;
+      const penaltyMessage = `${p.name} hit 100% Scandal — lost 50% money and dropped a rank.`;
+      showToast(penaltyMessage, 4500);
+      pushFeed(penaltyMessage, 'scandal', snapshot.round);
     });
     sound.playWarning();
   }
@@ -1191,6 +1302,8 @@ function renderMatchEnd(snapshot) {
     .forEach((p) => {
       const li = document.createElement('li');
       li.className = 'match-end-player-row';
+      li.dataset.rank = p.rank;
+      li.classList.toggle('is-winner', p.id === snapshot.winnerId);
 
       const header = document.createElement('div');
       header.className = 'match-end-player-header';
@@ -1267,6 +1380,62 @@ function showParliamentOverlay(pendingVote) {
   voteCountdownInterval = setInterval(tick, 1000);
 }
 
+// Newest-first log of what just happened, shown as "Berita Terkini". Built
+// client-side from the same action snapshots that already drive the toasts,
+// so it needs no extra data from the host.
+const FEED_LIMIT = 6;
+const FEED_TYPE_LABELS = {
+  projek: 'PROJEK',
+  media: 'KEMPEN IMEJ',
+  politik: 'POLITIK',
+  sabotaj: 'SABOTAJ',
+  skip: 'GILIRAN DILANGKAU',
+  scandal: 'SKANDAL',
+};
+const matchFeed = [];
+
+function pushFeed(text, type, round) {
+  matchFeed.unshift({ text, meta: `${FEED_TYPE_LABELS[type] || ''} · RONDA ${round}` });
+  matchFeed.length = Math.min(matchFeed.length, FEED_LIMIT);
+  renderFeed();
+}
+
+function renderFeed() {
+  const container = $('#match-feed');
+  container.innerHTML = '';
+  if (!matchFeed.length) {
+    const empty = document.createElement('p');
+    empty.className = 'feed-empty';
+    empty.textContent = 'Belum ada berita. Setiap tindakan pemain akan dilaporkan di sini.';
+    container.appendChild(empty);
+    return;
+  }
+  matchFeed.forEach((entry) => {
+    const item = document.createElement('div');
+    item.className = 'feed-item';
+    const text = document.createElement('span');
+    text.className = 'feed-text';
+    text.textContent = entry.text;
+    const meta = document.createElement('span');
+    meta.className = 'feed-meta';
+    meta.textContent = entry.meta;
+    item.appendChild(text);
+    item.appendChild(meta);
+    container.appendChild(item);
+  });
+}
+
+function renderRoundHeader(round, maxRounds) {
+  $('#match-round-label').innerHTML = `<span>RONDA</span> <span>${round} / ${maxRounds}</span>`;
+  const pips = $('#match-round-pips');
+  pips.innerHTML = '';
+  for (let i = 1; i <= maxRounds; i++) {
+    const pip = document.createElement('span');
+    pip.className = `round-pip${i < round ? ' is-past' : i === round ? ' is-current' : ''}`;
+    pips.appendChild(pip);
+  }
+}
+
 function renderMatchScreen(snapshot) {
   if (!snapshot.started) return;
 
@@ -1284,10 +1453,12 @@ function renderMatchScreen(snapshot) {
 
   if (!hasEnteredMatchScreen) {
     hasEnteredMatchScreen = true;
+    matchFeed.length = 0;
+    renderFeed();
     showScreen('match');
   }
 
-  $('#match-round-label').textContent = `ROUND ${snapshot.round} / ${snapshot.maxRounds}`;
+  renderRoundHeader(snapshot.round, snapshot.maxRounds);
   renderMatchPlayerList(snapshot);
   renderHierarchy(snapshot);
   renderActionPanel(snapshot);
@@ -1300,6 +1471,19 @@ function renderMatchScreen(snapshot) {
 }
 
 function wireMatchActions() {
+  // Keys 1-6 mirror the numbered action cards. Ignored while typing, while
+  // any dialog is open, or when the card is disabled (not your turn).
+  document.addEventListener('keydown', (e) => {
+    if (e.metaKey || e.ctrlKey || e.altKey || e.repeat) return;
+    if (!$('#screen-match').classList.contains('is-active')) return;
+    if (e.target.closest && e.target.closest('input, textarea, select, [contenteditable]')) return;
+    if ($$('.modal-overlay').some((overlay) => !overlay.hidden)) return;
+    const card = $(`.action-card[data-key="${e.key}"]`);
+    if (!card || card.disabled) return;
+    e.preventDefault();
+    card.click();
+  });
+
   $('#btn-host-skip').addEventListener('click', () => {
     sound.playClick();
     match.skipCurrentPlayer();
@@ -1572,9 +1756,11 @@ function wireSettingsModal() {
 function wireHowtoModal() {
   const modal = $('#howto-modal');
 
-  $('#btn-lobby-help').addEventListener('click', () => {
-    sound.playClick();
-    modal.hidden = false;
+  ['#btn-lobby-help', '#btn-menu-help'].forEach((selector) => {
+    $(selector).addEventListener('click', () => {
+      sound.playClick();
+      modal.hidden = false;
+    });
   });
 
   $('#btn-close-howto').addEventListener('click', () => {

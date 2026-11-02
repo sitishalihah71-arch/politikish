@@ -4,6 +4,9 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>POLITIK'ISH</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700;900&family=Barlow+Condensed:wght@500;600;700&family=Source+Serif+4:ital,wght@0,400;0,600;0,700;1,400&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -22,11 +25,27 @@
   </div>
 
   <section id="screen-main-menu" class="screen is-active" data-screen="main-menu">
-    <div class="menu-content">
-      <div class="menu-logo">
-        <h1 class="logo-text">POLITIK<span class="logo-accent">'ISH</span></h1>
-        <p class="logo-tagline">NAIK PANGKAT. KUMPUL DUIT. JANGAN KANTOI.</p>
-      </div>
+    <div class="np-strip">
+      <span>Akhbar Satira</span>
+      <span>Edisi Khas</span>
+      <span class="np-strip-gap"></span>
+    </div>
+
+    <div class="menu-logo">
+      <h1 class="logo-text">POLITIK<span class="logo-accent">'ISH</span></h1>
+      <p class="logo-tagline">NAIK PANGKAT. KUMPUL DUIT. JANGAN KANTOI.</p>
+    </div>
+
+    <div class="menu-main">
+      <section class="menu-col menu-col-steps">
+        <h3 class="np-colhead">Cara Bermain</h3>
+        <ol class="menu-steps">
+          <li><div><strong>Create atau join room</strong><p>Host kongsi kod 5 huruf. Pemain lain masukkan kod itu.</p></div></li>
+          <li><div><strong>Hias stickman anda</strong><p>Pilih rambut dan muka, atau tekan Random. Gaya sahaja.</p></div></li>
+          <li><div><strong>Semua Ready</strong><p>Kurang pemain? Host boleh Add Bot untuk isi kerusi kosong.</p></div></li>
+          <li><div><strong>Host tekan Start Match</strong><p>Giliran berputar. Setiap giliran, pilih tepat 1 tindakan.</p></div></li>
+        </ol>
+      </section>
 
       <div class="menu-actions">
         <button id="btn-create-room" class="menu-btn menu-btn-primary" type="button">
@@ -37,18 +56,35 @@
           <span class="menu-btn-label">Join Room</span>
           <span class="menu-btn-sub">Enter a room code</span>
         </button>
+        <button id="btn-menu-help" class="menu-help-link" type="button">How to Play</button>
       </div>
+
+      <section class="menu-col menu-col-ranks">
+        <h3 class="np-colhead">Tangga Pangkat</h3>
+        <div class="menu-ranks">
+          <div class="menu-rank" data-rank="president"><span class="menu-rank-name">Presiden</span><span class="menu-rank-note">Sentiasa satu kerusi</span></div>
+          <div class="menu-rank" data-rank="deputy"><span class="menu-rank-name">Timbalan Presiden</span><span class="menu-rank-note">Kerusi kurang, taruhan tinggi</span></div>
+          <div class="menu-rank" data-rank="ketua"><span class="menu-rank-name">Ketua ADUN</span><span class="menu-rank-note">Anak tangga pertama</span></div>
+          <div class="menu-rank" data-rank="ahli"><span class="menu-rank-name">Ahli Biasa</span><span class="menu-rank-note">Semua mula di sini</span></div>
+        </div>
+        <p class="menu-ranks-note">Semua mula di bawah. Presiden hanya satu kerusi.</p>
+      </section>
     </div>
 
-    <p class="menu-footer">2&ndash;6 Players &middot; Configurable Rounds &middot; One President</p>
+    <p class="menu-footer">2&ndash;6 Pemain &middot; Ronda boleh ditetapkan &middot; Seorang Presiden</p>
   </section>
 
   <section id="screen-room-host" class="screen" data-screen="room-host">
-    <div class="room-panel">
+    <header class="np-header">
       <button class="link-back" id="btn-room-host-back" type="button">&larr; Back</button>
-
+      <div class="np-brand">POLITIK<span>'ISH</span></div>
+      <div class="np-header-gap"></div>
+    </header>
+    <div class="room-panel">
       <div id="room-host-form-view" class="room-view">
+        <span class="np-chip">Untuk Host</span>
         <h2 class="room-title">Create Room</h2>
+        <p class="room-sub">Anda dapat kod 5 huruf untuk dikongsi dengan pemain lain.</p>
         <label class="field-label" for="room-host-name">Your Name</label>
         <input id="room-host-name" class="field-input" type="text" maxlength="16" placeholder="Enter your name" autocomplete="off">
         <p id="room-host-error" class="field-error" hidden></p>
@@ -60,11 +96,16 @@
   </section>
 
   <section id="screen-room-join" class="screen" data-screen="room-join">
-    <div class="room-panel">
+    <header class="np-header">
       <button class="link-back" id="btn-room-join-back" type="button">&larr; Back</button>
-
+      <div class="np-brand">POLITIK<span>'ISH</span></div>
+      <div class="np-header-gap"></div>
+    </header>
+    <div class="room-panel">
       <div id="room-join-form-view" class="room-view">
+        <span class="np-chip">Untuk Pemain</span>
         <h2 class="room-title">Join Room</h2>
+        <p class="room-sub">Masukkan kod 5 huruf daripada host.</p>
         <label class="field-label" for="room-join-name">Your Name</label>
         <input id="room-join-name" class="field-input" type="text" maxlength="16" placeholder="Enter your name" autocomplete="off">
         <label class="field-label" for="room-join-code">Room Code</label>
@@ -82,8 +123,13 @@
   </section>
 
   <section id="screen-customize" class="screen" data-screen="customize">
-    <div class="customize-panel">
+    <header class="np-header">
       <button class="link-back" id="btn-customize-back" type="button">&larr; Back</button>
+      <div class="np-brand">POLITIK<span>'ISH</span></div>
+      <div class="np-header-gap"></div>
+    </header>
+    <div class="customize-panel">
+      <div class="np-cardbar"><span>Kad Calon</span><span>POLITIK<b>'ISH</b></span></div>
       <h2 class="room-title">Customize Your Stickman</h2>
 
       <div id="customize-preview" class="customize-preview"></div>
@@ -114,191 +160,224 @@
         </button>
       </div>
 
-      <button id="btn-customize-random" class="menu-btn menu-btn-secondary" type="button">
-        <span class="menu-btn-label">Random</span>
-      </button>
-      <button id="btn-customize-done" class="menu-btn menu-btn-primary" type="button">
-        <span class="menu-btn-label">Done</span>
-      </button>
+      <div class="customize-actions">
+        <button id="btn-customize-random" class="menu-btn menu-btn-secondary" type="button">
+          <span class="menu-btn-label">Random</span>
+        </button>
+        <button id="btn-customize-done" class="menu-btn menu-btn-primary" type="button">
+          <span class="menu-btn-label">Done</span>
+        </button>
+      </div>
     </div>
   </section>
 
   <section id="screen-lobby" class="screen" data-screen="lobby">
     <div class="lobby-panel">
       <div class="lobby-header">
-        <div>
+        <div class="lobby-code-block">
           <span class="field-label">Room Code</span>
           <div id="lobby-code" class="room-code-text lobby-code">------</div>
         </div>
+        <div class="np-brand lobby-brand">POLITIK<span>'ISH</span></div>
         <div class="lobby-header-actions">
           <button id="btn-lobby-help" class="link-back lobby-header-link" type="button">How to Play</button>
-          <button id="btn-lobby-leave" class="link-back lobby-header-link" type="button">Leave</button>
+          <button id="btn-lobby-leave" class="link-back lobby-header-link is-danger" type="button">Leave</button>
         </div>
       </div>
 
-      <div class="lobby-settings-summary">
-        <span class="field-label">Room Settings</span>
-        <div class="lobby-settings-summary-row">
-          <span>Players: <strong id="lobby-settings-players">4</strong></span>
-          <span>Rounds: <strong id="lobby-settings-rounds">10</strong></span>
-          <span id="lobby-settings-events-badge" class="lobby-settings-events-badge">Events: ON</span>
-        </div>
-      </div>
-
-      <ul id="lobby-player-list" class="lobby-player-list"></ul>
-
-      <button id="btn-lobby-ready" class="menu-btn menu-btn-primary" type="button">
-        <span class="menu-btn-label">Ready</span>
-      </button>
-
-      <div id="lobby-host-controls" class="lobby-controls" hidden>
-        <div class="lobby-settings-edit">
-          <div class="setting-row">
-            <label for="setting-lobby-players">Players</label>
-            <select id="setting-lobby-players" class="field-select"></select>
-          </div>
-          <div class="setting-row">
-            <label for="setting-lobby-rounds">Rounds</label>
-            <select id="setting-lobby-rounds" class="field-select"></select>
-          </div>
-          <div class="setting-row">
-            <label for="setting-lobby-events">National Events</label>
-            <button id="setting-lobby-events" class="switch" type="button" role="switch" aria-checked="true">
-              <span class="switch-knob"></span>
-            </button>
-          </div>
-          <div class="setting-row">
-            <label for="setting-lobby-parliament">Parliament Voting</label>
-            <button id="setting-lobby-parliament" class="switch" type="button" role="switch" aria-checked="true">
-              <span class="switch-knob"></span>
-            </button>
-          </div>
-        </div>
-        <button id="btn-lobby-add-bot" class="menu-btn menu-btn-secondary" type="button" hidden>
-          <span class="menu-btn-label">Add Bot</span>
-        </button>
-        <p id="lobby-start-hint" class="room-status">Waiting for all players to be ready&hellip;</p>
-        <button id="btn-lobby-start" class="menu-btn menu-btn-primary" type="button" disabled>
-          <span class="menu-btn-label">Start Match</span>
+      <div class="lobby-roster">
+        <div class="np-colhead lobby-roster-head"><span>Senarai Pemain</span><span id="lobby-count"></span></div>
+        <ul id="lobby-player-list" class="lobby-player-list"></ul>
+        <button id="btn-lobby-ready" class="menu-btn menu-btn-primary" type="button">
+          <span class="menu-btn-label">Ready</span>
         </button>
       </div>
 
-      <div id="lobby-guest-controls" class="lobby-controls" hidden>
-        <p class="room-status">Waiting for host to start&hellip;</p>
-      </div>
+      <aside class="lobby-side">
+        <div class="lobby-side-head"><span>Tetapan Bilik</span></div>
+        <div class="lobby-settings-summary">
+          <div class="lobby-settings-summary-row">
+            <span>Players: <strong id="lobby-settings-players">4</strong></span>
+            <span>Rounds: <strong id="lobby-settings-rounds">10</strong></span>
+            <span id="lobby-settings-events-badge" class="lobby-settings-events-badge">Events: ON</span>
+          </div>
+        </div>
+
+        <div id="lobby-host-controls" class="lobby-controls" hidden>
+          <div class="lobby-settings-edit">
+            <div class="setting-row">
+              <label for="setting-lobby-players">Players</label>
+              <select id="setting-lobby-players" class="field-select"></select>
+            </div>
+            <div class="setting-row">
+              <label for="setting-lobby-rounds">Rounds</label>
+              <select id="setting-lobby-rounds" class="field-select"></select>
+            </div>
+            <div class="setting-row">
+              <label for="setting-lobby-events">National Events</label>
+              <button id="setting-lobby-events" class="switch" type="button" role="switch" aria-checked="true">
+                <span class="switch-knob"></span>
+              </button>
+            </div>
+            <div class="setting-row">
+              <label for="setting-lobby-parliament">Parliament Voting</label>
+              <button id="setting-lobby-parliament" class="switch" type="button" role="switch" aria-checked="true">
+                <span class="switch-knob"></span>
+              </button>
+            </div>
+          </div>
+          <button id="btn-lobby-add-bot" class="menu-btn menu-btn-secondary" type="button" hidden>
+            <span class="menu-btn-label">Add Bot</span>
+          </button>
+          <p id="lobby-start-hint" class="room-status">Waiting for all players to be ready&hellip;</p>
+          <button id="btn-lobby-start" class="menu-btn menu-btn-primary" type="button" disabled>
+            <span class="menu-btn-label">Start Match</span>
+          </button>
+        </div>
+
+        <div id="lobby-guest-controls" class="lobby-controls" hidden>
+          <p class="room-status">Waiting for host to start&hellip;</p>
+        </div>
+      </aside>
     </div>
   </section>
 
   <section id="screen-match" class="screen" data-screen="match">
-    <div class="match-topbar">
-      <div class="match-topbar-brand">
+    <header class="match-masthead">
+      <div class="match-masthead-round">
+        <h2 id="match-round-label">RONDA 1 / 10</h2>
+        <div class="round-pips" id="match-round-pips" aria-hidden="true"></div>
+      </div>
+      <div class="match-masthead-brand">
         <span class="match-logo">POLITIK<span class="logo-accent">'ISH</span></span>
+        <span class="match-tagline">NAIK PANGKAT &middot; KUMPUL DUIT &middot; JANGAN KANTOI</span>
       </div>
-      <div class="match-topbar-center">
-        <h2 id="match-round-label">ROUND 1 / 10</h2>
-      </div>
-      <div class="match-topbar-right"></div>
-    </div>
+      <div class="match-masthead-right"></div>
+    </header>
 
     <div class="match-body">
-      <aside class="match-players" id="match-player-list"></aside>
+      <aside class="match-side-left">
+        <section class="match-block">
+          <h3 class="block-title">SENARAI CALON</h3>
+          <div class="match-players" id="match-player-list"></div>
+        </section>
+        <section class="match-block match-feed-block">
+          <h3 class="block-title">BERITA TERKINI</h3>
+          <div class="match-feed" id="match-feed"></div>
+        </section>
+      </aside>
 
-      <div class="match-hierarchy">
-        <div class="hierarchy-tier" data-rank="president">
-          <div class="hierarchy-seats" id="seats-president"></div>
-          <div class="hierarchy-tier-label tier-president">PRESIDEN <span class="tier-count" id="count-president">0 / 1</span></div>
+      <div class="match-center">
+        <div class="turn-banner" id="match-turn-banner">
+          <div class="turn-banner-main">
+            <span id="match-turn-label">GILIRAN</span>
+            <span id="match-turn-name">-</span>
+          </div>
+          <span class="turn-banner-hint" id="match-turn-hint"></span>
+          <button id="btn-host-skip" class="host-skip-btn" type="button" hidden>Skip Turn</button>
         </div>
-        <div class="hierarchy-tier" data-rank="deputy">
-          <div class="hierarchy-seats" id="seats-deputy"></div>
-          <div class="hierarchy-tier-label tier-deputy">TIMBALAN PRESIDEN <span class="tier-count" id="count-deputy">0 / 2</span></div>
-        </div>
-        <div class="hierarchy-tier" data-rank="ketua">
-          <div class="hierarchy-seats" id="seats-ketua"></div>
-          <div class="hierarchy-tier-label tier-ketua">KETUA ADUN <span class="tier-count" id="count-ketua">0 / 3</span></div>
-        </div>
-        <div class="hierarchy-tier" data-rank="ahli">
-          <div class="hierarchy-seats" id="seats-ahli"></div>
-          <div class="hierarchy-tier-label tier-ahli">AHLI BIASA <span class="tier-count" id="count-ahli">0 / 4</span></div>
+
+        <div class="match-hierarchy">
+          <div class="hierarchy-tier" data-rank="president">
+            <div class="hierarchy-tier-label tier-president">
+              <span class="tier-name">PRESIDEN</span>
+              <span class="tier-count" id="count-president">0 / 1</span>
+              <span class="tier-flag" hidden>SASARAN ANDA</span>
+            </div>
+            <div class="hierarchy-seats" id="seats-president"></div>
+          </div>
+          <div class="hierarchy-tier" data-rank="deputy">
+            <div class="hierarchy-tier-label tier-deputy">
+              <span class="tier-name">TIMBALAN PRESIDEN</span>
+              <span class="tier-count" id="count-deputy">0 / 2</span>
+              <span class="tier-flag" hidden>SASARAN ANDA</span>
+            </div>
+            <div class="hierarchy-seats" id="seats-deputy"></div>
+          </div>
+          <div class="hierarchy-tier" data-rank="ketua">
+            <div class="hierarchy-tier-label tier-ketua">
+              <span class="tier-name">KETUA ADUN</span>
+              <span class="tier-count" id="count-ketua">0 / 3</span>
+              <span class="tier-flag" hidden>SASARAN ANDA</span>
+            </div>
+            <div class="hierarchy-seats" id="seats-ketua"></div>
+          </div>
+          <div class="hierarchy-tier" data-rank="ahli">
+            <div class="hierarchy-tier-label tier-ahli">
+              <span class="tier-name">AHLI BIASA</span>
+              <span class="tier-count" id="count-ahli">0 / 4</span>
+              <span class="tier-flag" hidden>SASARAN ANDA</span>
+            </div>
+            <div class="hierarchy-seats" id="seats-ahli"></div>
+          </div>
         </div>
       </div>
 
-      <aside class="match-actions">
-        <div class="match-actions-header">
-          <h3>PILIH 1 TINDAKAN</h3>
-          <p>Giliran: <span id="match-turn-name">-</span></p>
-          <button id="btn-host-skip" class="host-skip-btn" type="button" hidden>Skip Turn</button>
-        </div>
-        <div class="action-grid">
-          <button class="action-card action-projek" id="btn-action-projek" type="button">
-            <span class="action-name">Projek</span>
-            <span class="action-desc">Dapatkan duit dan influence, tapi risiko skandal naik.</span>
-          </button>
-          <button class="action-card action-politik" id="btn-action-politik" type="button">
-            <span class="action-name">Politik</span>
-            <span class="action-desc">Guna influence untuk naik pangkat. Boleh berjaya atau gagal.</span>
-          </button>
-          <button class="action-card action-sabotaj" id="btn-action-sabotaj" type="button">
-            <span class="action-name">Sabotaj</span>
-            <span class="action-desc">Serang pemain lain untuk jatuhkan mereka.</span>
-          </button>
-          <button class="action-card action-media" id="btn-action-media" type="button">
-            <span class="action-name">Kempen Imej</span>
-            <span class="action-desc">Bayar media untuk kurangkan skandal anda.</span>
-          </button>
-          <button class="action-card action-raid" id="btn-action-raid" type="button">
-            <span class="action-name">Political Raid</span>
-            <span class="action-desc">Cuba rampas Aset Politik pemain lain.</span>
-          </button>
-          <button class="action-card action-market" id="btn-action-market" type="button">
-            <span class="action-name">Black Market</span>
-            <span class="action-desc">Beli Aset Politik terus dengan duit.</span>
-          </button>
+      <aside class="match-status">
+        <div class="status-head">
+          <span class="status-title" id="status-title">Laporan Anda</span>
+          <span class="rank-chip" id="status-rank" data-rank="ahli">AHLI BIASA</span>
         </div>
 
-        <button id="btn-backroom-deal" class="backroom-deal-btn" type="button">🤝 Backroom Deal</button>
+        <div class="status-tiles">
+          <div class="status-tile">
+            <span class="tile-label">DUIT</span>
+            <span class="tile-value" id="status-money">RM0</span>
+          </div>
+          <div class="status-tile">
+            <span class="tile-label">INFLUENCE</span>
+            <span class="tile-value" id="status-influence">0</span>
+          </div>
+        </div>
 
         <div class="scandal-meter">
-          <div class="scandal-meter-header">
+          <div class="meter-header">
             <h4>METER SKANDAL</h4>
-            <span id="match-scandal-pct">0%</span>
+            <span class="meter-value"><span id="match-scandal-pct">0%</span> &middot; <span id="match-scandal-zone">Bersih</span></span>
           </div>
-          <div class="scandal-bar"><div class="scandal-bar-fill" id="scandal-bar-fill"></div></div>
+          <div class="scandal-bar" id="scandal-bar" data-zone="clean">
+            <span class="scandal-zone scandal-zone-1"></span>
+            <span class="scandal-zone scandal-zone-2"></span>
+            <span class="scandal-zone scandal-zone-3"></span>
+            <span class="scandal-bar-fill" id="scandal-bar-fill"></span>
+          </div>
           <div class="scandal-zones">
-            <span>Bersih<br>0%</span>
-            <span>Diperhati<br>30%</span>
-            <span>Disiasat<br>60%</span>
-            <span>Ditahan<br>100%</span>
+            <span>Bersih</span>
+            <span>Diperhati</span>
+            <span>Disiasat</span>
+            <span>Ditahan</span>
           </div>
+          <p class="scandal-warning">Skandal 100%: hilang 50% duit, turun 1 pangkat, reset ke 30%.</p>
         </div>
 
-        <p class="scandal-warning">Jika skandal capai 100%: Hilang 50% duit, turun 1 pangkat, skandal reset ke 30%.</p>
-
         <div class="approval-meter">
-          <div class="approval-meter-header">
+          <div class="meter-header">
             <h4>KADAR PERSETUJUAN</h4>
-            <span id="match-approval-pct">50%</span>
+            <span class="meter-value" id="match-approval-pct">50%</span>
           </div>
           <div class="approval-bar"><div class="approval-bar-fill" id="approval-bar-fill"></div></div>
         </div>
 
         <div class="political-network">
-          <h4>RANGKAIAN POLITIK</h4>
+          <h4>ASET &amp; RANGKAIAN</h4>
+          <div class="status-assets" id="status-assets"></div>
           <div class="political-network-row">
-            <span>🏗️ Infrastructure</span>
-            <span id="pn-infrastructure">0/3</span>
+            <span>Infrastructure</span>
+            <span class="pn-track" data-pn="infrastructure"><i></i><i></i><i></i><b id="pn-infrastructure">0/3</b></span>
           </div>
           <div class="political-network-row">
-            <span>🏥 Public Services</span>
-            <span id="pn-publicServices">0/3</span>
+            <span>Public Services</span>
+            <span class="pn-track" data-pn="publicServices"><i></i><i></i><i></i><b id="pn-publicServices">0/3</b></span>
           </div>
           <div class="political-network-row">
-            <span>🏢 Administration</span>
-            <span id="pn-administration">0/3</span>
+            <span>Administration</span>
+            <span class="pn-track" data-pn="administration"><i></i><i></i><i></i><b id="pn-administration">0/3</b></span>
           </div>
         </div>
 
         <div class="secret-objective-panel" id="secret-objective-panel" hidden>
-          <h4>🎯 OBJEKTIF RAHSIA</h4>
+          <span class="secret-stamp">SULIT</span>
+          <h4>OBJEKTIF RAHSIA</h4>
           <p id="secret-objective-description"></p>
           <span id="secret-objective-status" class="secret-objective-status">Belum selesai</span>
         </div>
@@ -306,25 +385,98 @@
     </div>
 
     <div class="match-bottom-bar">
-      <div class="bottom-stat"><span class="bottom-stat-value" id="bottom-money">RM0</span><span class="bottom-stat-label">DUIT</span></div>
-      <div class="bottom-stat"><span class="bottom-stat-value" id="bottom-influence">0</span><span class="bottom-stat-label">INFLUENCE</span></div>
-      <div class="bottom-stat"><span class="bottom-stat-value" id="bottom-scandal">0%</span><span class="bottom-stat-label">SKANDAL</span></div>
-      <div class="bottom-stat"><span class="bottom-stat-value" id="bottom-rank">Ahli Biasa</span><span class="bottom-stat-label">PANGKAT SEMASA</span></div>
+      <div class="bottom-stat"><span class="bottom-stat-label">DUIT</span><span class="bottom-stat-value" id="bottom-money">RM0</span></div>
+      <div class="bottom-stat"><span class="bottom-stat-label">INFLUENCE</span><span class="bottom-stat-value" id="bottom-influence">0</span></div>
+      <div class="bottom-stat"><span class="bottom-stat-label">SKANDAL</span><span class="bottom-stat-value" id="bottom-scandal">0%</span></div>
+      <div class="bottom-stat"><span class="bottom-stat-label">PANGKAT</span><span class="bottom-stat-value" id="bottom-rank">Ahli Biasa</span></div>
     </div>
+
+    <footer class="match-dock">
+      <div class="action-grid">
+        <button class="action-card action-projek" id="btn-action-projek" type="button" data-key="1">
+          <span class="action-card-top">
+            <span class="action-icon"><svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 21h18M5 21V9l7-5 7 5v12M9 21v-6h6v6"/></svg></span>
+            <span class="action-key" aria-hidden="true">1</span>
+          </span>
+          <span class="action-name">Projek</span>
+          <span class="action-desc">Dapatkan duit dan influence, tapi risiko skandal naik.</span>
+          <span class="action-chips"><span>Percuma</span><span>Pasti berjaya</span></span>
+        </button>
+        <button class="action-card action-politik" id="btn-action-politik" type="button" data-key="2">
+          <span class="action-card-top">
+            <span class="action-icon"><svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20V6M6 12l6-6 6 6"/></svg></span>
+            <span class="action-key" aria-hidden="true">2</span>
+          </span>
+          <span class="action-name">Politik</span>
+          <span class="action-desc">Guna influence untuk naik pangkat. Boleh berjaya atau gagal.</span>
+          <span class="action-chips"><span>Guna Influence</span><span>Ada risiko</span></span>
+        </button>
+        <button class="action-card action-sabotaj" id="btn-action-sabotaj" type="button" data-key="3">
+          <span class="action-card-top">
+            <span class="action-icon"><svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5a7 7 0 1 0 0 14 7 7 0 0 0 0-14zM12 2v5M12 17v5M2 12h5M17 12h5"/></svg></span>
+            <span class="action-key" aria-hidden="true">3</span>
+          </span>
+          <span class="action-name">Sabotaj</span>
+          <span class="action-desc">Serang pemain lain untuk jatuhkan mereka.</span>
+          <span class="action-chips"><span>Guna Influence</span><span>Ada risiko</span></span>
+        </button>
+        <button class="action-card action-media" id="btn-action-media" type="button" data-key="4">
+          <span class="action-card-top">
+            <span class="action-icon"><svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 10v4h3l7 4V6L7 10H4zM17 9a4 4 0 0 1 0 6"/></svg></span>
+            <span class="action-key" aria-hidden="true">4</span>
+          </span>
+          <span class="action-name">Kempen Imej</span>
+          <span class="action-desc">Bayar media untuk kurangkan skandal anda.</span>
+          <span class="action-chips"><span>Guna Duit</span><span>Kurang skandal</span></span>
+        </button>
+        <button class="action-card action-raid" id="btn-action-raid" type="button" data-key="5">
+          <span class="action-card-top">
+            <span class="action-icon"><svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13 2L4 14h7l-1 8 9-12h-7l1-8z"/></svg></span>
+            <span class="action-key" aria-hidden="true">5</span>
+          </span>
+          <span class="action-name">Political Raid</span>
+          <span class="action-desc">Cuba rampas Aset Politik pemain lain.</span>
+          <span class="action-chips"><span>Guna Influence</span></span>
+        </button>
+        <button class="action-card action-market" id="btn-action-market" type="button" data-key="6">
+          <span class="action-card-top">
+            <span class="action-icon"><svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 8h12l1 12H5L6 8zM9 8a3 3 0 0 1 6 0"/></svg></span>
+            <span class="action-key" aria-hidden="true">6</span>
+          </span>
+          <span class="action-name">Black Market</span>
+          <span class="action-desc">Beli Aset Politik terus dengan duit.</span>
+          <span class="action-chips"><span>Guna Duit</span><span>Pasti</span></span>
+        </button>
+      </div>
+
+      <button id="btn-backroom-deal" class="backroom-deal-btn" type="button">
+        <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="6" width="18" height="12" rx="1"/><path d="M3 8l9 6 9-6"/></svg>
+        <span class="backroom-deal-title">Backroom Deal</span>
+        <span class="backroom-deal-sub">Bila-bila masa, bukan giliran sahaja</span>
+      </button>
+    </footer>
   </section>
 
   <section id="screen-match-end" class="screen" data-screen="match-end">
     <div class="match-end-panel">
-      <h2 class="match-end-title">MATCH OVER</h2>
-      <div id="match-end-winner" class="match-end-winner"></div>
-      <ul id="match-end-standings" class="lobby-player-list"></ul>
-      <button id="btn-match-end-menu" class="menu-btn menu-btn-primary" type="button">
-        <span class="menu-btn-label">Back to Main Menu</span>
-      </button>
+      <header class="match-end-head">
+        <div class="np-brand">POLITIK<span>'ISH</span></div>
+        <h2 class="match-end-title">Edisi Terakhir &middot; Match Over</h2>
+      </header>
+      <div class="match-end-main">
+        <div id="match-end-winner" class="match-end-winner"></div>
+        <div class="match-end-board">
+          <div class="np-colhead"><span>Kedudukan Akhir</span><span class="match-end-rule">Pangkat tertinggi menang. Seri: skandal paling rendah.</span></div>
+          <ul id="match-end-standings" class="lobby-player-list"></ul>
+          <button id="btn-match-end-menu" class="menu-btn menu-btn-primary" type="button">
+            <span class="menu-btn-label">Back to Main Menu</span>
+          </button>
+        </div>
+      </div>
     </div>
   </section>
 
-  <div id="action-picker-modal" class="modal-overlay" hidden>
+  <div id="action-picker-modal" class="modal-overlay np-modal" hidden>
     <div class="modal-card picker-card" role="dialog" aria-modal="true">
       <div class="modal-header">
         <h2 id="picker-title">Pilih Projek</h2>
@@ -336,7 +488,7 @@
     </div>
   </div>
 
-  <div id="target-picker-modal" class="modal-overlay" hidden>
+  <div id="target-picker-modal" class="modal-overlay np-modal" hidden>
     <div class="modal-card" role="dialog" aria-modal="true">
       <div class="modal-header">
         <h2 id="target-picker-title">Pilih Sasaran</h2>
@@ -355,7 +507,7 @@
     </div>
   </div>
 
-  <div id="attempt-modal" class="modal-overlay" hidden>
+  <div id="attempt-modal" class="modal-overlay np-modal" hidden>
     <div class="modal-card" role="dialog" aria-modal="true">
       <div class="modal-header">
         <h2 id="attempt-title">Politik</h2>
@@ -383,8 +535,9 @@
     </div>
   </div>
 
-  <div id="news-overlay" class="modal-overlay news-overlay" hidden>
+  <div id="news-overlay" class="modal-overlay news-overlay np-modal" hidden>
     <div class="modal-card news-card" role="dialog" aria-modal="true">
+      <div class="np-kicker">Flash &middot; Berita Tergempar</div>
       <div class="news-icon" id="news-icon">📈</div>
       <h2 id="news-headline" class="news-headline">BREAKING NEWS</h2>
       <p id="news-description" class="news-description"></p>
@@ -394,8 +547,9 @@
     </div>
   </div>
 
-  <div id="parliament-overlay" class="modal-overlay parliament-overlay" hidden>
+  <div id="parliament-overlay" class="modal-overlay parliament-overlay np-modal" hidden>
     <div class="modal-card parliament-card" role="dialog" aria-modal="true">
+      <div class="np-kicker">Sidang Tergempar</div>
       <div class="parliament-icon">🏛️</div>
       <h2 class="parliament-title">PARLIAMENT VOTING</h2>
       <p id="parliament-motion-name" class="parliament-motion-name"></p>
@@ -412,7 +566,7 @@
     </div>
   </div>
 
-  <div id="deal-offer-modal" class="modal-overlay" hidden>
+  <div id="deal-offer-modal" class="modal-overlay np-modal" hidden>
     <div class="modal-card" role="dialog" aria-modal="true">
       <div class="modal-header">
         <h2>Backroom Deal</h2>
@@ -440,8 +594,9 @@
     </div>
   </div>
 
-  <div id="deal-incoming-overlay" class="modal-overlay deal-overlay" hidden>
+  <div id="deal-incoming-overlay" class="modal-overlay deal-overlay np-modal" hidden>
     <div class="modal-card deal-incoming-card" role="dialog" aria-modal="true">
+      <div class="np-kicker np-kicker-purple">Sulit &middot; Antara Kita</div>
       <div class="deal-incoming-icon">🤝</div>
       <h2 class="deal-incoming-title">Backroom Deal</h2>
       <p id="deal-incoming-description" class="deal-incoming-description"></p>
@@ -456,7 +611,7 @@
     </div>
   </div>
 
-  <div id="howto-modal" class="modal-overlay" hidden>
+  <div id="howto-modal" class="modal-overlay np-modal" hidden>
     <div class="modal-card howto-card" role="dialog" aria-modal="true" aria-labelledby="howto-title">
       <div class="modal-header">
         <h2 id="howto-title">How to Play</h2>
@@ -588,7 +743,7 @@
     </div>
   </div>
 
-  <div id="settings-modal" class="modal-overlay" hidden>
+  <div id="settings-modal" class="modal-overlay np-modal" hidden>
     <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="settings-title">
       <div class="modal-header">
         <h2 id="settings-title">Settings</h2>
