@@ -183,7 +183,7 @@ export const GAME_BALANCE = {
       'Ahmad', 'Ramli', 'Zarina', 'Farid', 'Halim', 'Ita',
       'Rosnah', 'Zulkifli', 'Salmah', 'Hafiz', 'Mazlan', 'Aina',
     ],
-    turnDelayMs: 1600,
+    turnDelayMs: 3000, // long enough for the action story pop-up to be read
     actionWeights: {
       projek: 30,
       politik: 20,

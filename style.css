@@ -1745,7 +1745,7 @@ body[data-screen="match"] .global-corner-icons .icon-btn:hover {
   flex: 1;
   min-width: 0;
   display: grid;
-  grid-template-columns: repeat(6, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 12px;
 }
 
@@ -2445,6 +2445,20 @@ body[data-screen="match"] .global-corner-icons .icon-btn:hover {
     letter-spacing: 0.1em;
   }
 
+  .seat-action {
+    padding: 0 4px 1px;
+    border-width: 1.5px;
+  }
+
+  .seat-action-label {
+    font-size: 11px;
+    letter-spacing: 0.08em;
+  }
+
+  .seat-action-sub {
+    font-size: 10px;
+  }
+
   #screen-match .hierarchy-shield-badge {
     left: calc(50% + 10px);
   }
@@ -2482,6 +2496,14 @@ body[data-screen="match"] .global-corner-icons .icon-btn:hover {
     white-space: nowrap;
   }
 
+  /* "Timbalan Presiden" doesn't fit one line in a quarter-width cell. */
+  #bottom-rank {
+    white-space: normal;
+    font-size: 13px;
+    line-height: 1.1;
+    text-align: center;
+  }
+
   .match-dock {
     flex: none;
     flex-direction: column;
@@ -2492,7 +2514,7 @@ body[data-screen="match"] .global-corner-icons .icon-btn:hover {
   }
 
   .action-grid {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 8px;
   }
 
@@ -5270,4 +5292,135 @@ body[data-screen="lobby"] .global-corner-icons {
 
 .parliament-actions .menu-btn {
   min-width: 90px;
+}
+
+/* ---------- Seat action buttons (Politik / Sabotaj / KABEL) ---------- */
+.seat-action {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 1px 7px 2px;
+  border: 2px solid currentColor;
+  background: var(--paper-2);
+  line-height: 1.15;
+  cursor: pointer;
+  transition: transform 0.12s ease, background 0.12s ease;
+}
+
+.seat-action-label {
+  font: 700 13px var(--np-condensed);
+  letter-spacing: 0.14em;
+}
+
+.seat-action-sub {
+  font: 600 11px var(--np-condensed);
+  letter-spacing: 0.06em;
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+
+.seat-action-label {
+  white-space: nowrap;
+}
+
+.seat-action-politik { color: var(--np-blue); transform: rotate(3deg); }
+.seat-action-sabotaj { color: var(--np-red); transform: rotate(4deg); }
+.seat-action-kabel { color: var(--np-purple); transform: rotate(-3deg); }
+
+.seat-action:not(:disabled):hover,
+.seat-action:not(:disabled):focus-visible {
+  background: currentColor;
+  transform: rotate(0) scale(1.06);
+}
+
+.seat-action:not(:disabled):hover .seat-action-label,
+.seat-action:not(:disabled):hover .seat-action-sub,
+.seat-action:not(:disabled):focus-visible .seat-action-label,
+.seat-action:not(:disabled):focus-visible .seat-action-sub {
+  color: var(--paper-2);
+}
+
+.seat-action:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+/* ---------- Action story pop-up (shown to every player) ---------- */
+.np-modal.story-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding: 96px 16px 16px;
+  background: none;
+  pointer-events: none;
+}
+
+.np-modal.story-overlay[hidden] {
+  display: none;
+}
+
+.story-overlay .story-card {
+  width: min(440px, 100%);
+  pointer-events: auto;
+  animation: story-in 0.28s ease-out;
+}
+
+.story-overlay[data-tone="good"] .np-kicker { background: var(--np-green); }
+.story-overlay[data-tone="hot"] .np-kicker { background: var(--np-red); }
+.story-overlay[data-tone="bad"] .np-kicker { background: var(--ink-3); }
+.story-overlay[data-tone="dark"] .np-kicker { background: var(--ink); }
+
+.np-modal .story-card .news-headline {
+  font-size: 24px;
+}
+
+.np-modal .story-card .news-description {
+  font-size: 16px;
+}
+
+.story-extra {
+  margin: 0;
+  font: italic 400 14px/1.4 var(--np-body);
+  color: var(--np-red);
+}
+
+.story-meta {
+  font: 700 13px var(--np-condensed);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+
+.story-timer {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: 100%;
+  height: 4px;
+  background: var(--ink);
+  transform-origin: left;
+  animation: story-countdown var(--story-ms, 5500ms) linear forwards;
+}
+
+@keyframes story-countdown {
+  from { transform: scaleX(1); }
+  to { transform: scaleX(0); }
+}
+
+@keyframes story-in {
+  from { opacity: 0; transform: translateY(-14px) rotate(-1deg); }
+  to { opacity: 1; transform: none; }
+}
+
+@media (max-width: 640px) {
+  .np-modal.story-overlay {
+    padding-top: 78px;
+  }
+
+  .np-modal .story-card .news-headline {
+    font-size: 21px;
+  }
 }

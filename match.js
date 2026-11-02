@@ -415,6 +415,9 @@ function settleTurnState() {
   if (newActive && newActive.skipNextTurn) {
     newActive.skipNextTurn = false;
     turnSkipping = true;
+    // The move that just resolved gets broadcast first - otherwise the skip
+    // notice would overwrite it as `lastAction` before anyone ever saw it.
+    broadcastMatchUpdate();
     setLastAction({ type: 'skip', actorId: newActive.id, reason: 'bribery-leak' });
     broadcastMatchUpdate();
     const skippedSlot = turnSlot;

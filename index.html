@@ -414,46 +414,28 @@
           <span class="action-desc">Dapatkan duit dan influence, tapi risiko skandal naik.</span>
           <span class="action-chips"><span>Percuma</span><span>Pasti</span></span>
         </button>
-        <button class="action-card action-politik" id="btn-action-politik" type="button" data-key="2">
-          <span class="action-card-top">
-            <span class="action-icon"><svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20V6M6 12l6-6 6 6"/></svg></span>
-            <span class="action-key" aria-hidden="true">2</span>
-          </span>
-          <span class="action-name">Politik</span>
-          <span class="action-desc">Guna influence untuk naik pangkat. Boleh berjaya atau gagal.</span>
-          <span class="action-chips"><span>Guna Influence</span><span>Ada risiko</span></span>
-        </button>
-        <button class="action-card action-sabotaj" id="btn-action-sabotaj" type="button" data-key="3">
-          <span class="action-card-top">
-            <span class="action-icon"><svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5a7 7 0 1 0 0 14 7 7 0 0 0 0-14zM12 2v5M12 17v5M2 12h5M17 12h5"/></svg></span>
-            <span class="action-key" aria-hidden="true">3</span>
-          </span>
-          <span class="action-name">Sabotaj</span>
-          <span class="action-desc">Serang pemain lain untuk jatuhkan mereka.</span>
-          <span class="action-chips"><span>Guna Influence</span><span>Ada risiko</span></span>
-        </button>
-        <button class="action-card action-media" id="btn-action-media" type="button" data-key="4">
+        <button class="action-card action-media" id="btn-action-media" type="button" data-key="2">
           <span class="action-card-top">
             <span class="action-icon"><svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 10v4h3l7 4V6L7 10H4zM17 9a4 4 0 0 1 0 6"/></svg></span>
-            <span class="action-key" aria-hidden="true">4</span>
+            <span class="action-key" aria-hidden="true">2</span>
           </span>
           <span class="action-name">Kempen Imej</span>
           <span class="action-desc">Bayar media untuk kurangkan skandal anda.</span>
           <span class="action-chips"><span>Guna Duit</span><span>−Skandal</span></span>
         </button>
-        <button class="action-card action-raid" id="btn-action-raid" type="button" data-key="5">
+        <button class="action-card action-raid" id="btn-action-raid" type="button" data-key="3">
           <span class="action-card-top">
             <span class="action-icon"><svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13 2L4 14h7l-1 8 9-12h-7l1-8z"/></svg></span>
-            <span class="action-key" aria-hidden="true">5</span>
+            <span class="action-key" aria-hidden="true">3</span>
           </span>
           <span class="action-name">Political Raid</span>
           <span class="action-desc">Cuba rampas Aset Politik pemain lain.</span>
           <span class="action-chips"><span>Guna Influence</span><span>Ada risiko</span></span>
         </button>
-        <button class="action-card action-market" id="btn-action-market" type="button" data-key="6">
+        <button class="action-card action-market" id="btn-action-market" type="button" data-key="4">
           <span class="action-card-top">
             <span class="action-icon"><svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 8h12l1 12H5L6 8zM9 8a3 3 0 0 1 6 0"/></svg></span>
-            <span class="action-key" aria-hidden="true">6</span>
+            <span class="action-key" aria-hidden="true">4</span>
           </span>
           <span class="action-name">Black Market</span>
           <span class="action-desc">Beli Aset Politik terus dengan duit.</span>
@@ -556,6 +538,21 @@
       <button id="btn-news-continue" class="menu-btn menu-btn-primary" type="button">
         <span class="menu-btn-label">Continue</span>
       </button>
+    </div>
+  </div>
+
+  <div id="story-overlay" class="story-overlay np-modal" data-tone="neutral" hidden>
+    <div class="modal-card news-card story-card" role="dialog" aria-live="polite">
+      <div class="np-kicker" id="story-kicker">Flash</div>
+      <div class="news-icon" id="story-icon">📰</div>
+      <h2 id="story-headline" class="news-headline"></h2>
+      <p id="story-body" class="news-description"></p>
+      <p id="story-extra" class="story-extra" hidden></p>
+      <div class="story-meta" id="story-meta"></div>
+      <button id="btn-story-close" class="menu-btn menu-btn-primary" type="button">
+        <span class="menu-btn-label">Teruskan</span>
+      </button>
+      <span class="story-timer" id="story-timer"></span>
     </div>
   </div>
 
@@ -680,8 +677,8 @@
           <p class="howto-lede">Pick exactly one per turn. Colors match the buttons you'll see in-game.</p>
           <div class="howto-action-grid">
             <div class="howto-action projek"><div class="howto-action-name">Projek</div><p>Dapatkan duit dan influence, tapi risiko skandal naik. Always succeeds.</p><div class="howto-tags"><span>no cost</span><span>+💰 +⭐</span><span>+⚠️ scandal</span></div></div>
-            <div class="howto-action politik"><div class="howto-action-name">Politik</div><p>Guna influence untuk naik pangkat. Promotes into an EMPTY seat one rank up.</p><div class="howto-tags"><span>costs ⭐</span><span>needs open seat</span><span>% chance</span></div></div>
-            <div class="howto-action sabotaj"><div class="howto-action-name">Sabotaj</div><p>Serang pemain lain untuk jatuhkan mereka. Steals an OCCUPIED seat one rank up.</p><div class="howto-tags"><span>costs ⭐</span><span>needs full seat</span><span>% chance</span></div></div>
+            <div class="howto-action politik"><div class="howto-action-name">Politik</div><p>Tekan butang POLITIK di bawah kerusi kosong satu pangkat di atas anda — terus cuba naik pangkat. Promotes into an EMPTY seat one rank up.</p><div class="howto-tags"><span>costs ⭐</span><span>needs open seat</span><span>% chance</span></div></div>
+            <div class="howto-action sabotaj"><div class="howto-action-name">Sabotaj</div><p>Tekan butang SABOTAJ di bawah penghuni kerusi penuh satu pangkat di atas — terus serang. Steals an OCCUPIED seat one rank up.</p><div class="howto-tags"><span>costs ⭐</span><span>needs full seat</span><span>% chance</span></div></div>
             <div class="howto-action media"><div class="howto-action-name">Kempen Imej</div><p>Bayar media untuk kurangkan skandal anda. Or gain Influence / Public Support.</p><div class="howto-tags"><span>costs 💰</span><span>−⚠️ scandal</span></div></div>
             <div class="howto-action raid"><div class="howto-action-name">Political Raid</div><p>Cuba rampas Aset Politik pemain lain. Risky bid to steal a rival's asset — you can't steal a type you already own (no duplicates).</p><div class="howto-tags"><span>costs ⭐</span><span>% chance</span><span>steals asset</span></div></div>
             <div class="howto-action market"><div class="howto-action-name">Black Market</div><p>Advanced Mode sahaja. Beli Aset Politik terus: RM60,000 and +50% Scandal. Limited shared stock (2 items per player).</p><div class="howto-tags"><span>costs 💰</span><span>+50% scandal</span><span>limited stock</span></div></div>
