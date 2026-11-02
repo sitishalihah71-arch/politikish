@@ -1291,12 +1291,53 @@ function openAttemptModal(targetId, assetId) {
 
 // Every resolved action pops a newspaper story up on every player's screen.
 // It never blocks play: the backdrop is click-through, a newer story simply
-// replaces the one showing (the full log stays in Berita Terkini), and it
-// closes itself after STORY_DURATION_MS.
-const STORY_DURATION_MS = 5500;
+// replaces the one showing, and it closes itself after STORY_DURATION_MS.
+// Holding a finger / the mouse button on the card freezes the countdown until
+// release. Every story is also kept in Berita Terkini and can be reopened
+// from there.
+const STORY_DURATION_MS = 10000;
 let storyTimer = null;
+let storyRemainingMs = 0;
+let storyResumedAt = 0;
+let storyHeld = false;
+let storyQueued = null; // newest story that arrived while the card was held
+
+function startStoryCountdown(ms) {
+  clearTimeout(storyTimer);
+  storyRemainingMs = ms;
+  storyResumedAt = Date.now();
+  storyTimer = setTimeout(hideActionStory, ms);
+}
+
+function pauseStoryCountdown() {
+  if (storyHeld || $('#story-overlay').hidden) return;
+  storyHeld = true;
+  clearTimeout(storyTimer);
+  storyTimer = null;
+  storyRemainingMs = Math.max(0, storyRemainingMs - (Date.now() - storyResumedAt));
+  $('#story-timer').style.animationPlayState = 'paused';
+}
+
+function resumeStoryCountdown() {
+  if (!storyHeld) return;
+  storyHeld = false;
+  $('#story-timer').style.animationPlayState = '';
+  if (storyQueued) {
+    const queued = storyQueued;
+    storyQueued = null;
+    showActionStory(queued.story, queued.round);
+    return;
+  }
+  if ($('#story-overlay').hidden) return;
+  startStoryCountdown(Math.max(storyRemainingMs, 1500));
+}
 
 function showActionStory(story, round) {
+  // Don't yank the story out from under a finger that is reading it.
+  if (storyHeld) {
+    storyQueued = { story, round };
+    return;
+  }
   const overlay = $('#story-overlay');
   overlay.dataset.tone = story.tone;
   $('#story-kicker').textContent = story.kicker;
@@ -1308,21 +1349,36 @@ function showActionStory(story, round) {
   extra.hidden = !story.extra;
   $('#story-meta').textContent = [story.meta, `Ronda ${round}`].filter(Boolean).join(' · ');
 
+  storyQueued = null;
   const timerBar = $('#story-timer');
   timerBar.style.setProperty('--story-ms', `${STORY_DURATION_MS}ms`);
   timerBar.style.animation = 'none';
   void timerBar.offsetWidth; // restart the countdown bar for a replaced story
   timerBar.style.animation = '';
+  timerBar.style.animationPlayState = '';
 
   overlay.hidden = false;
-  clearTimeout(storyTimer);
-  storyTimer = setTimeout(hideActionStory, STORY_DURATION_MS);
+  startStoryCountdown(STORY_DURATION_MS);
 }
 
 function hideActionStory() {
   clearTimeout(storyTimer);
   storyTimer = null;
+  storyHeld = false;
+  storyQueued = null;
   $('#story-overlay').hidden = true;
+}
+
+function wireStoryHold() {
+  const card = $('#story-overlay .story-card');
+  card.addEventListener('pointerdown', (e) => {
+    if (e.target.closest('button')) return;
+    pauseStoryCountdown();
+  });
+  ['pointerup', 'pointercancel'].forEach((type) => {
+    window.addEventListener(type, resumeStoryCountdown);
+  });
+  card.addEventListener('contextmenu', (e) => e.preventDefault());
 }
 
 function handleActionFeedback(snapshot) {
@@ -1391,7 +1447,13 @@ function handleActionResult(snapshot) {
   if (story) showActionStory(story, snapshot.round);
   if (message) {
     if (!story) showToast(message, 4000);
-    pushFeed(message, action.type, snapshot.round);
+    pushFeed(message, action.type, snapshot.round, story || {
+      kicker: 'Berita Terkini',
+      icon: '📰',
+      headline: message,
+      body: '',
+      tone: 'neutral',
+    });
   }
 
   if (snapshot.lastPenalized && snapshot.lastPenalized.length) {
@@ -1400,7 +1462,13 @@ function handleActionResult(snapshot) {
       if (!p) return;
       const penaltyMessage = `${p.name} hit 100% Scandal — lost 50% money and dropped a rank.`;
       showToast(penaltyMessage, 4500);
-      pushFeed(penaltyMessage, 'scandal', snapshot.round);
+      pushFeed(penaltyMessage, 'scandal', snapshot.round, {
+        kicker: 'Skandal',
+        icon: '💥',
+        headline: `${p.name} jatuh!`,
+        body: penaltyMessage,
+        tone: 'bad',
+      });
     });
     sound.playWarning();
   }
@@ -1417,7 +1485,13 @@ function handlePassivePayout(snapshot) {
       .filter(Boolean)
       .join(', ');
     const payoutMessage = `📺 Media Empire paid +${payout.amount} Influence to ${names}.`;
-    pushFeed(payoutMessage, 'media_empire', payout.round);
+    pushFeed(payoutMessage, 'media_empire', payout.round, {
+      kicker: 'Empayar Media',
+      icon: '📺',
+      headline: 'Empayar Media bayar dividen',
+      body: payoutMessage,
+      tone: 'good',
+    });
     if (payout.ownerIds.includes(snapshot.localPlayerId)) showToast(`📺 Media Empire: +${payout.amount} Influence`, 3500);
   }
 }
@@ -1534,7 +1608,13 @@ function renderMatchEnd(snapshot) {
 function showNewsOverlay(pending, round) {
   if (!pending || pending.seq === lastSeenEventSeq) return;
   lastSeenEventSeq = pending.seq;
-  pushFeed(pending.feedText || `${pending.headline}: ${pending.description}`, pending.feedType || 'news', round);
+  pushFeed(pending.feedText || `${pending.headline}: ${pending.description}`, pending.feedType || 'news', round, {
+    kicker: 'Berita Terkini',
+    icon: pending.icon,
+    headline: pending.headline,
+    body: pending.description,
+    tone: 'dark',
+  });
   $('#news-icon').textContent = pending.icon;
   $('#news-headline').textContent = pending.headline;
   $('#news-description').textContent = pending.description;
@@ -1614,8 +1694,8 @@ const FEED_TYPE_LABELS = {
 };
 const matchFeed = [];
 
-function pushFeed(text, type, round) {
-  matchFeed.unshift({ text, meta: `${FEED_TYPE_LABELS[type] || ''} · RONDA ${round}` });
+function pushFeed(text, type, round, story = null) {
+  matchFeed.unshift({ text, story, round, meta: `${FEED_TYPE_LABELS[type] || ''} · RONDA ${round}` });
   matchFeed.length = Math.min(matchFeed.length, FEED_LIMIT);
   renderFeed();
 }
@@ -1633,6 +1713,23 @@ function renderFeed() {
   matchFeed.forEach((entry) => {
     const item = document.createElement('div');
     item.className = 'feed-item';
+    if (entry.story) {
+      item.classList.add('is-replayable');
+      item.tabIndex = 0;
+      item.setAttribute('role', 'button');
+      item.title = 'Klik untuk lihat berita penuh';
+      const replay = () => {
+        sound.playClick();
+        showActionStory(entry.story, entry.round);
+      };
+      item.addEventListener('click', replay);
+      item.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          replay();
+        }
+      });
+    }
     const text = document.createElement('span');
     text.className = 'feed-text';
     text.textContent = entry.text;
@@ -1984,6 +2081,7 @@ export function initUI() {
   wireLobbyScreen();
   wireRoomEvents();
   wireMatchActions();
+  wireStoryHold();
   wireMatchEvents();
   applySoundUI();
   sound.applySoundSettings(settings);

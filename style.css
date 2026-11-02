@@ -1206,6 +1206,21 @@ body[data-screen="match"] .global-corner-icons .icon-btn:hover {
   border-top: 0;
 }
 
+.feed-item.is-replayable {
+  cursor: pointer;
+}
+
+.feed-item.is-replayable:hover .feed-text,
+.feed-item.is-replayable:focus-visible .feed-text {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.feed-item.is-replayable:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 3px;
+}
+
 .feed-text {
   font-size: 14px;
   line-height: 1.3;
@@ -5365,6 +5380,10 @@ body[data-screen="lobby"] .global-corner-icons {
 .story-overlay .story-card {
   width: min(440px, 100%);
   pointer-events: auto;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  touch-action: manipulation;
   animation: story-in 0.28s ease-out;
 }
 
