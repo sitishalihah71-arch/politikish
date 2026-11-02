@@ -98,7 +98,12 @@ export function decideBotAction(bot, players, offers) {
     candidates.push({ type: 'raid', weight: w.raid, build: () => ({ type: 'raid', targetId: raidPick.target.id, assetId: raidPick.asset.id, extraInfluence: 0 }) });
   }
 
-  const affordableMarketTypes = offers.marketOffers.filter((type) => validateMarketPurchase(bot, type).ok);
+  // The Black Market's Scandal hit is the whole risk of using it - a bot
+  // won't buy its way straight into the 100% Scandal penalty.
+  const marketIsSafe = bot.scandal + GAME_BALANCE.blackMarket.scandalGain < GAME_BALANCE.scandal.penaltyThreshold;
+  const affordableMarketTypes = marketIsSafe
+    ? offers.marketOffers.filter((type) => validateMarketPurchase(bot, type, offers.marketOffers).ok)
+    : [];
   if (affordableMarketTypes.length) {
     candidates.push({ type: 'market', weight: w.market, build: () => ({ type: 'market', assetType: randomChoice(affordableMarketTypes) }) });
   }

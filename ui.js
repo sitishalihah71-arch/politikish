@@ -13,6 +13,7 @@ import * as sabotage from './sabotage.js';
 import * as opportunities from './politicalOpportunities.js';
 import { SECRET_OBJECTIVES } from './objectives.js';
 import { GAME_BALANCE } from './balance.js';
+import { getProjekReward } from './projects.js';
 
 let settings = loadSettings();
 let toastTimer = null;
@@ -271,6 +272,9 @@ function renderLobby(snapshot) {
   const eventsBadge = $('#lobby-settings-events-badge');
   eventsBadge.textContent = `Events: ${snapshot.settings.nationalEvents ? 'ON' : 'OFF'}`;
   eventsBadge.classList.toggle('is-on', snapshot.settings.nationalEvents);
+  const advancedBadge = $('#lobby-settings-advanced-badge');
+  advancedBadge.textContent = `Advanced: ${snapshot.settings.advancedMode ? 'ON' : 'OFF'}`;
+  advancedBadge.classList.toggle('is-on', Boolean(snapshot.settings.advancedMode));
 
   $('#lobby-count').textContent = `${snapshot.players.length} / ${snapshot.settings.maxPlayers}`;
 
@@ -363,6 +367,7 @@ function renderLobby(snapshot) {
     $('#setting-lobby-rounds').value = String(snapshot.settings.rounds);
     $('#setting-lobby-events').setAttribute('aria-checked', String(snapshot.settings.nationalEvents));
     $('#setting-lobby-parliament').setAttribute('aria-checked', String(snapshot.settings.parliamentVoting));
+    $('#setting-lobby-advanced').setAttribute('aria-checked', String(Boolean(snapshot.settings.advancedMode)));
 
     const canStart = room.canStartMatch();
     const startBtn = $('#btn-lobby-start');
@@ -426,6 +431,11 @@ function wireLobbyScreen() {
     const current = $('#setting-lobby-parliament').getAttribute('aria-checked') === 'true';
     room.updateSettings({ parliamentVoting: !current });
   });
+
+  $('#setting-lobby-advanced').addEventListener('click', () => {
+    const current = $('#setting-lobby-advanced').getAttribute('aria-checked') === 'true';
+    room.updateSettings({ advancedMode: !current });
+  });
 }
 
 function wireRoomEvents() {
@@ -462,11 +472,15 @@ const ACTION_REJECT_MESSAGES = {
   'insufficient-money': 'Not enough Money.',
   'insufficient-funds': 'You no longer have enough to make that offer.',
   'already-owned': 'You already own that Political Asset.',
+  'duplicate-asset': 'You already own that Political Asset — no duplicates.',
+  'out-of-stock': 'That asset is out of stock.',
+  'market-closed': 'The Black Market is only open in Advanced Mode.',
 };
 
 let hasEnteredMatchScreen = false;
 let hasEnteredMatchEndScreen = false;
 let lastHandledActionSeq = -1;
+let lastHandledPassiveSeq = 0;
 let lastSeenEventSeq = -1;
 let lastSeenVoteSeq = -1;
 let voteCountdownInterval = null;
@@ -684,29 +698,51 @@ function renderActionPanel(snapshot) {
   // up next - the buttons must reflect that or they'd look clickable while
   // silently doing nothing.
   const votingOpen = Boolean(snapshot.pendingVote);
+  // A turn being auto-skipped (leaked Backroom Deal) is nominally the
+  // benched player's turn, but the host refuses every action during it - so
+  // it must read and behave as a skipped turn, not as "your turn".
+  const skipping = Boolean(snapshot.skipping) && !votingOpen;
+  const blocked = votingOpen || skipping;
 
   const turnNameEl = $('#match-turn-name');
   turnNameEl.textContent = activePlayer ? activePlayer.name : '-';
   turnNameEl.hidden = isMyTurn;
   if (activePlayer && !isMyTurn) appendPublicSupportBadge(turnNameEl, activePlayer);
-  $('#match-turn-label').textContent = isMyTurn ? 'GILIRAN ANDA' : 'GILIRAN';
-  $('#match-turn-banner').classList.toggle('is-my-turn', isMyTurn && !votingOpen);
+  $('#match-turn-label').textContent = skipping ? 'GILIRAN DILANGKAU' : isMyTurn ? 'GILIRAN ANDA' : 'GILIRAN';
+  $('#match-turn-banner').classList.toggle('is-my-turn', isMyTurn && !blocked);
+  $('#match-turn-banner').classList.toggle('is-skipping', skipping);
   $('#match-turn-hint').textContent = votingOpen
     ? 'Undian Parlimen sedang berlangsung.'
-    : isMyTurn
-      ? 'Pilih 1 tindakan di bawah.'
-      : activePlayer ? `Menunggu ${activePlayer.name}…` : '';
+    : skipping
+      ? (isMyTurn ? 'Perjanjian anda bocor — giliran ini dilangkau.' : `${activePlayer ? activePlayer.name : 'Pemain'} kehilangan giliran (perjanjian bocor).`)
+      : isMyTurn
+        ? 'Pilih 1 tindakan di bawah.'
+        : activePlayer ? `Menunggu ${activePlayer.name}…` : '';
+  renderVoteTimer(snapshot.pendingVote);
 
   const isPresident = localPlayer && localPlayer.rank === 'president';
 
-  $('#btn-action-projek').disabled = !isMyTurn || votingOpen;
-  $('#btn-action-politik').disabled = !isMyTurn || isPresident || votingOpen;
-  $('#btn-action-sabotaj').disabled = !isMyTurn || isPresident || votingOpen;
-  $('#btn-action-media').disabled = !isMyTurn || votingOpen;
+  $('#btn-action-projek').disabled = !isMyTurn || blocked;
+  $('#btn-action-politik').disabled = !isMyTurn || isPresident || blocked;
+  $('#btn-action-sabotaj').disabled = !isMyTurn || isPresident || blocked;
+  $('#btn-action-media').disabled = !isMyTurn || blocked;
   // Raid isn't tied to rank progression the way Sabotaj/Politik are, so
   // it's available to a President too - only turn-gated.
-  $('#btn-action-raid').disabled = !isMyTurn || votingOpen;
-  $('#btn-action-market').disabled = !isMyTurn || votingOpen;
+  $('#btn-action-raid').disabled = !isMyTurn || blocked;
+  // The Black Market only exists in Advanced Mode.
+  $('#btn-action-market').disabled = !isMyTurn || blocked || !snapshot.advancedMode;
+
+  // Whatever picker the player had open belongs to a turn that is no longer
+  // theirs to act on - close it rather than leave a dead modal on screen.
+  // (Backroom Deals aren't turn-gated, so their target picker stays.)
+  if (blocked || !isMyTurn) {
+    const stale = ['action-picker-modal', 'attempt-modal'];
+    if (targetPickerMode !== 'deal') stale.push('target-picker-modal');
+    stale.forEach((id) => {
+      const modal = document.getElementById(id);
+      if (modal) modal.hidden = true;
+    });
+  }
 
   const skipBtn = $('#btn-host-skip');
   skipBtn.hidden = !snapshot.isHost;
@@ -732,7 +768,7 @@ function renderActionPanel(snapshot) {
     $('#approval-bar-fill').style.width = `${approvalPct}%`;
   }
 
-  renderActionChips(localPlayer);
+  renderActionChips(localPlayer, snapshot);
   renderStatusAssets(localPlayer);
   renderPoliticalNetwork(localPlayer);
   renderSecretObjective(localPlayer);
@@ -749,7 +785,7 @@ function setActionChips(buttonId, labels) {
   });
 }
 
-function renderActionChips(localPlayer) {
+function renderActionChips(localPlayer, snapshot) {
   if (!localPlayer) return;
   const rank = localPlayer.rank;
   const percent = (value) => `${Math.round(value * 100)}%`;
@@ -770,7 +806,12 @@ function renderActionChips(localPlayer) {
   }
 
   setActionChips('btn-action-raid', [`${opportunities.getRaidCost(0)} Inf`, percent(opportunities.describeRaidChance(0).base)]);
-  setActionChips('btn-action-market', [formatMoney(GAME_BALANCE.blackMarket.price), 'Pasti']);
+  if (snapshot && snapshot.advancedMode) {
+    const left = (snapshot.marketStock || []).length;
+    setActionChips('btn-action-market', [formatMoney(GAME_BALANCE.blackMarket.price), `+${GAME_BALANCE.blackMarket.scandalGain}% Skandal · ${left} stok`]);
+  } else {
+    setActionChips('btn-action-market', ['Ditutup', 'Advanced sahaja']);
+  }
 }
 
 // Secret Objective data only ever appears on the local player's own entry
@@ -897,9 +938,11 @@ function openOffersModal(action, offers) {
   // a distinct enough shape that it gets its own short branch rather than
   // threading a third case through the projek/media logic below.
   if (action === 'market') {
+    const price = GAME_BALANCE.blackMarket.price;
+    const stock = snapshot.marketStock || [];
     offers.forEach((assetType) => {
       const def = opportunities.OPPORTUNITY_DEFINITIONS[assetType];
-      const price = GAME_BALANCE.blackMarket.price;
+      const left = stock.filter((t) => t === assetType).length;
       const btn = document.createElement('button');
       btn.className = 'picker-card-item';
       btn.type = 'button';
@@ -910,6 +953,8 @@ function openOffersModal(action, offers) {
       btn.appendChild(name);
       btn.appendChild(makeCardLine(def.description(), true));
       btn.appendChild(makeCardLine(`${MONEY_ICON} Cost: ${formatMoney(price)}`, false));
+      btn.appendChild(makeCardLine(`${SCANDAL_ICON} +${GAME_BALANCE.blackMarket.scandalGain}% Scandal`, false));
+      btn.appendChild(makeCardLine(`📦 Stock left: ${left}`, true));
       btn.disabled = localPlayer.money < price;
 
       btn.addEventListener('click', () => {
@@ -942,8 +987,11 @@ function openOffersModal(action, offers) {
     }
 
     if (action === 'projek') {
-      btn.appendChild(makeCardLine(`${MONEY_ICON} +${formatMoney(card.money)}`, true));
-      btn.appendChild(makeCardLine(`${INFLUENCE_ICON} +${card.influence} Influence`, true));
+      // Show what this player would actually be paid (table-size scaling and
+      // Corporate Sponsor included), not the card's face values.
+      const reward = getProjekReward(localPlayer, card, snapshot.players.length);
+      btn.appendChild(makeCardLine(`${MONEY_ICON} +${formatMoney(reward.money)}${reward.sponsorBoosted ? ' 🏦' : ''}`, true));
+      btn.appendChild(makeCardLine(`${INFLUENCE_ICON} +${reward.influence} Influence`, true));
       btn.appendChild(makeCardLine(`${SCANDAL_ICON} +${card.scandal}% Scandal`, false));
     } else {
       btn.appendChild(makeCardLine(`${MONEY_ICON} Cost: ${formatMoney(card.cost)}`, false));
@@ -987,7 +1035,22 @@ function makeTargetPickerRow(player, label, onClick) {
   return btn;
 }
 
+// Every (owner, asset) pair the local player could actually take: another
+// player's asset of a type the local player doesn't already hold - stealing
+// a copy of something they own would just be a wasted turn (and the host
+// refuses it as 'duplicate-asset').
+function getRaidableAssets(snapshot, localPlayer) {
+  const ownedTypes = new Set((localPlayer.assets || []).map((a) => a.type));
+  return snapshot.players
+    .filter((p) => p.id !== localPlayer.id)
+    .flatMap((p) => (p.assets || []).map((asset) => ({ player: p, asset })))
+    .filter(({ asset }) => !ownedTypes.has(asset.type));
+}
+
+let targetPickerMode = null;
+
 function openTargetPicker(context) {
+  targetPickerMode = context.mode;
   const snapshot = match.getMatchSnapshot();
   const localPlayer = findLocalPlayer(snapshot);
 
@@ -999,18 +1062,16 @@ function openTargetPicker(context) {
     $('#kabel-banner').hidden = true;
     const listEl = $('#target-picker-list');
     listEl.innerHTML = '';
-    snapshot.players
-      .filter((p) => p.id !== localPlayer.id)
-      .flatMap((p) => (p.assets || []).map((asset) => ({ player: p, asset })))
-      .forEach(({ player, asset }) => {
-        const def = opportunities.OPPORTUNITY_DEFINITIONS[asset.type];
-        const label = `${player.name} — ${def ? def.name : asset.type}`;
-        listEl.appendChild(makeTargetPickerRow(player, label, () => {
-          sound.playClick();
-          $('#target-picker-modal').hidden = true;
-          openAttemptModal('raid', player.id, false, asset.id);
-        }));
-      });
+    const rows = getRaidableAssets(snapshot, localPlayer);
+    rows.forEach(({ player, asset }) => {
+      const def = opportunities.OPPORTUNITY_DEFINITIONS[asset.type];
+      const label = `${player.name} — ${def ? `${def.icon} ${def.name}` : asset.type}`;
+      listEl.appendChild(makeTargetPickerRow(player, label, () => {
+        sound.playClick();
+        $('#target-picker-modal').hidden = true;
+        openAttemptModal('raid', player.id, false, asset.id);
+      }));
+    });
     $('#target-picker-modal').hidden = false;
     return;
   }
@@ -1125,6 +1186,12 @@ function makeBreakdownRow(label, value, cls) {
 // stay in sync instead of re-deriving it separately. Kabel is just Sabotaj
 // with the target-rank-keyed KABEL_TABLE/cost instead of the attacker-rank
 // one - same math, same confirmation dialog.
+// Owned Political Assets change the real odds (Party Machinery for the
+// attacker's Politik, Royal Connection for a Sabotaj/Kabel target), so the
+// preview has to know about them or it would quote the wrong chance.
+let attemptCtx = { hasMachinery: false, targetRoyal: false };
+const PARTY_MACHINERY_BONUS = GAME_BALANCE.politicalOpportunity.assets.partyMachinery.promotionChanceBonusPercent / 100;
+
 function resolveAttemptConfig(kind, fromRank, isKabel, targetRank) {
   if (kind === 'raid') {
     return {
@@ -1140,15 +1207,19 @@ function resolveAttemptConfig(kind, fromRank, isKabel, targetRank) {
   }
   if (kind === 'politik') {
     const config = politics.PROMOTION_TABLE[fromRank];
+    const machinery = attemptCtx.hasMachinery ? PARTY_MACHINERY_BONUS : 0;
     return {
       baseCost: config.baseCost,
-      baseChance: config.baseChance,
+      baseChance: config.baseChance + machinery,
       step: politics.PROMOTION_EXTRA_STEP,
       bonus: politics.PROMOTION_EXTRA_BONUS,
       maxChance: politics.PROMOTION_MAX_CHANCE,
       getCost: (extra) => politics.getPolitikCost(fromRank, extra),
-      getChance: (extra) => politics.calculatePolitikChance(fromRank, extra),
-      describe: null,
+      getChance: (extra) => politics.calculatePolitikChance(fromRank, extra, attemptCtx.hasMachinery),
+      describe: (extra) => {
+        const final = politics.calculatePolitikChance(fromRank, extra, attemptCtx.hasMachinery);
+        return { base: config.baseChance, machinery, extraBonus: Math.max(0, final - config.baseChance - machinery), final };
+      },
     };
   }
   if (isKabel) {
@@ -1159,8 +1230,8 @@ function resolveAttemptConfig(kind, fromRank, isKabel, targetRank) {
       bonus: sabotage.SABOTAGE_EXTRA_BONUS,
       maxChance: sabotage.SABOTAGE_MAX_CHANCE,
       getCost: (extra) => sabotage.getKabelCost(extra),
-      getChance: (extra, support) => sabotage.calculateKabelChance(targetRank, extra, support),
-      describe: (extra, support) => sabotage.describeKabelChance(targetRank, extra, support),
+      getChance: (extra, support) => sabotage.calculateKabelChance(targetRank, extra, support, attemptCtx.targetRoyal),
+      describe: (extra, support) => sabotage.describeKabelChance(targetRank, extra, support, attemptCtx.targetRoyal),
     };
   }
   return {
@@ -1170,8 +1241,8 @@ function resolveAttemptConfig(kind, fromRank, isKabel, targetRank) {
     bonus: sabotage.SABOTAGE_EXTRA_BONUS,
     maxChance: sabotage.SABOTAGE_MAX_CHANCE,
     getCost: (extra) => sabotage.getSabotajCost(fromRank, extra),
-    getChance: (extra, support) => sabotage.calculateSabotajChance(fromRank, extra, support),
-    describe: (extra, support) => sabotage.describeSabotajChance(fromRank, extra, support),
+    getChance: (extra, support) => sabotage.calculateSabotajChance(fromRank, extra, support, attemptCtx.targetRoyal),
+    describe: (extra, support) => sabotage.describeSabotajChance(fromRank, extra, support, attemptCtx.targetRoyal),
   };
 }
 
@@ -1183,6 +1254,21 @@ function renderSabotajBreakdown(breakdown, targetHasPublicSupport) {
   if (targetHasPublicSupport) {
     el.appendChild(makeBreakdownRow(`${SHIELD_ICON} Public Support`, `-${Math.round(breakdown.publicSupportPenalty * 100)}%`, 'is-negative'));
   }
+  if (breakdown.royalConnectionPenalty) {
+    el.appendChild(makeBreakdownRow('👑 Royal Connection', `-${Math.round(breakdown.royalConnectionPenalty * 100)}%`, 'is-negative'));
+  }
+  el.appendChild(makeBreakdownRow('Final Chance', `${Math.round(breakdown.final * 100)}%`, 'is-final'));
+  el.hidden = false;
+}
+
+function renderPolitikBreakdown(breakdown) {
+  const el = $('#attempt-breakdown');
+  el.innerHTML = '';
+  el.appendChild(makeBreakdownRow('Base Chance', `${Math.round(breakdown.base * 100)}%`));
+  if (breakdown.machinery) {
+    el.appendChild(makeBreakdownRow('⚙️ Party Machinery', `+${Math.round(breakdown.machinery * 100)}%`, 'is-positive'));
+  }
+  el.appendChild(makeBreakdownRow('Extra Influence', `+${Math.round(breakdown.extraBonus * 100)}%`, 'is-positive'));
   el.appendChild(makeBreakdownRow('Final Chance', `${Math.round(breakdown.final * 100)}%`, 'is-final'));
   el.hidden = false;
 }
@@ -1198,6 +1284,8 @@ function updateAttemptPreview(kind, fromRank, localPlayer, extra, targetHasPubli
 
   if (kind === 'sabotaj') {
     renderSabotajBreakdown(config.describe(extra, targetHasPublicSupport), targetHasPublicSupport);
+  } else if (kind === 'politik') {
+    renderPolitikBreakdown(config.describe(extra));
   } else {
     $('#attempt-breakdown').hidden = true;
   }
@@ -1216,6 +1304,10 @@ function openAttemptModal(kind, targetId, isKabel = false, assetId = null) {
   const target = kind !== 'politik' ? snapshot.players.find((p) => p.id === targetId) : null;
   const targetHasPublicSupport = Boolean(target && target.publicSupportTurns > 0);
   const targetRank = target ? target.rank : null;
+  attemptCtx = {
+    hasMachinery: (localPlayer.assets || []).some((a) => a.type === 'partyMachinery'),
+    targetRoyal: Boolean(target && (target.assets || []).some((a) => a.type === 'royalConnection')),
+  };
 
   const titles = { politik: 'Politik', raid: 'Political Raid', sabotaj: isKabel ? '🕴️ KABEL' : 'Sabotaj' };
   $('#attempt-title').textContent = titles[kind];
@@ -1255,6 +1347,11 @@ function openAttemptModal(kind, targetId, isKabel = false, assetId = null) {
 }
 
 function handleActionFeedback(snapshot) {
+  handleActionResult(snapshot);
+  handlePassivePayout(snapshot);
+}
+
+function handleActionResult(snapshot) {
   const action = snapshot.lastAction;
   const isNewAction = action && action.seq !== lastHandledActionSeq;
   if (!isNewAction) return;
@@ -1265,16 +1362,19 @@ function handleActionFeedback(snapshot) {
   let message = '';
 
   if (action.type === 'projek') {
-    message = `${actorName} used ${action.card.name}: +${formatMoney(action.card.money)}, +${action.card.influence} Influence`;
+    const reward = action.card.reward || { money: action.card.money, influence: action.card.influence };
+    message = `${actorName} used ${action.card.name}: +${formatMoney(reward.money)}, +${reward.influence} Influence`;
+    if (reward.sponsorBoosted) message += ' (Corporate Sponsor +20%)';
     sound.playCoins();
   } else if (action.type === 'media') {
     message = `${actorName} used ${action.card.name}`;
     if (action.card.kind === 'chance') message += action.success ? ' — Success!' : ' — Failed.';
     sound.playCoins();
   } else if (action.type === 'politik') {
+    const odds = `${Math.round(action.chance * 100)}%${action.partyMachinery ? ', Party Machinery' : ''}`;
     message = action.success
-      ? `${actorName} was promoted to ${RANK_LABELS[action.toRank]}!`
-      : `${actorName}'s Politik attempt failed.`;
+      ? `${actorName} was promoted to ${RANK_LABELS[action.toRank]}! (${odds})`
+      : `${actorName}'s Politik attempt failed. (${odds})`;
     if (action.success) sound.playPromotion(); else sound.playFailure();
   } else if (action.type === 'sabotaj') {
     const target = snapshot.players.find((p) => p.id === action.targetId);
@@ -1282,8 +1382,23 @@ function handleActionFeedback(snapshot) {
     const label = action.isKabel ? 'KABEL' : 'Sabotaj';
     message = action.success
       ? `${actorName} used ${label} on ${targetName} and took their seat!`
-      : `${actorName}'s ${label} on ${targetName} failed.`;
+      : `${actorName}'s ${label} on ${targetName} failed.${action.targetRoyal ? ' (Royal Connection protected them)' : ''}`;
     if (action.success) sound.playPromotion(); else sound.playFailure();
+  } else if (action.type === 'raid') {
+    const target = snapshot.players.find((p) => p.id === action.targetId);
+    const targetName = target ? target.name : 'a player';
+    const assetDef = opportunities.OPPORTUNITY_DEFINITIONS[action.assetType];
+    const assetName = assetDef ? `${assetDef.icon} ${assetDef.name}` : 'an asset';
+    message = action.success
+      ? `${actorName} raided ${targetName} and stole ${assetName}!`
+      : `${actorName}'s raid on ${targetName} failed — ${assetName} stays put.`;
+    if (action.success) sound.playPromotion(); else sound.playFailure();
+  } else if (action.type === 'market') {
+    const assetDef = opportunities.OPPORTUNITY_DEFINITIONS[action.assetType];
+    const assetName = assetDef ? `${assetDef.icon} ${assetDef.name}` : 'an asset';
+    message = `${actorName} bought ${assetName} on the Black Market for ${formatMoney(action.price)}`;
+    if (action.scandalGain) message += ` (+${action.scandalGain}% Scandal)`;
+    sound.playCoins();
   } else if (action.type === 'skip') {
     message = action.reason === 'bribery-leak'
       ? `${actorName}'s turn was skipped — their backroom deal leaked!`
@@ -1305,6 +1420,22 @@ function handleActionFeedback(snapshot) {
       pushFeed(penaltyMessage, 'scandal', snapshot.round);
     });
     sound.playWarning();
+  }
+}
+
+// Media Empire pays out at the round boundary with no action behind it, so
+// it's tracked on its own seq rather than riding on `lastAction`.
+function handlePassivePayout(snapshot) {
+  const payout = snapshot.passivePayout;
+  if (payout && payout.seq !== lastHandledPassiveSeq) {
+    lastHandledPassiveSeq = payout.seq;
+    const names = payout.ownerIds
+      .map((id) => snapshot.players.find((p) => p.id === id)?.name)
+      .filter(Boolean)
+      .join(', ');
+    const payoutMessage = `📺 Media Empire paid +${payout.amount} Influence to ${names}.`;
+    pushFeed(payoutMessage, 'media_empire', payout.round);
+    if (payout.ownerIds.includes(snapshot.localPlayerId)) showToast(`📺 Media Empire: +${payout.amount} Influence`, 3500);
   }
 }
 
@@ -1433,6 +1564,30 @@ function showNewsOverlay(pending) {
 // Voting hides *this client's* overlay immediately (already did their
 // part); the overlay only reappears for the next session's seq, or the
 // result arrives through the normal News overlay once the host resolves it.
+function formatCountdown(ms) {
+  const total = Math.max(0, Math.ceil(ms / 1000));
+  return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`;
+}
+
+// The countdown next to the "Undian Parlimen sedang berlangsung" hint keeps
+// ticking for everyone, including players who already voted and dismissed
+// the overlay - they're still waiting on the table, so they still need it.
+let voteHintInterval = null;
+function renderVoteTimer(pendingVote) {
+  const el = $('#match-vote-timer');
+  if (!pendingVote) {
+    el.hidden = true;
+    clearInterval(voteHintInterval);
+    voteHintInterval = null;
+    return;
+  }
+  const tick = () => { el.textContent = `⏱ ${formatCountdown(pendingVote.deadline - Date.now())}`; };
+  el.hidden = false;
+  tick();
+  clearInterval(voteHintInterval);
+  voteHintInterval = setInterval(tick, 500);
+}
+
 function showParliamentOverlay(pendingVote) {
   if (!pendingVote) {
     $('#parliament-overlay').hidden = true;
@@ -1449,8 +1604,7 @@ function showParliamentOverlay(pendingVote) {
   sound.playWarning();
 
   const tick = () => {
-    const remaining = Math.max(0, Math.ceil((pendingVote.deadline - Date.now()) / 1000));
-    $('#parliament-countdown').textContent = `${remaining}s`;
+    $('#parliament-countdown').textContent = formatCountdown(pendingVote.deadline - Date.now());
   };
   clearInterval(voteCountdownInterval);
   tick();
@@ -1466,6 +1620,9 @@ const FEED_TYPE_LABELS = {
   media: 'KEMPEN IMEJ',
   politik: 'POLITIK',
   sabotaj: 'SABOTAJ',
+  raid: 'RAMPASAN ASET',
+  market: 'PASAR GELAP',
+  media_empire: 'EMPAYAR MEDIA',
   skip: 'GILIRAN DILANGKAU',
   scandal: 'SKANDAL',
 };
@@ -1598,9 +1755,8 @@ function wireMatchActions() {
     sound.playClick();
     const snapshot = match.getMatchSnapshot();
     const localPlayer = findLocalPlayer(snapshot);
-    const hasAnyTarget = snapshot.players.some((p) => p.id !== localPlayer.id && (p.assets || []).length > 0);
-    if (!hasAnyTarget) {
-      showToast('No Political Assets to raid yet.');
+    if (getRaidableAssets(snapshot, localPlayer).length === 0) {
+      showToast('No Political Assets you can raid — you already own every type others hold.');
       return;
     }
     openTargetPicker({ mode: 'raid' });
@@ -1687,6 +1843,7 @@ function wireMatchActions() {
     hasEnteredMatchScreen = false;
     hasEnteredMatchEndScreen = false;
     lastHandledActionSeq = -1;
+    lastHandledPassiveSeq = 0;
     lastSeenEventSeq = -1;
     lastSeenVoteSeq = -1;
     clearInterval(voteCountdownInterval);
@@ -1712,6 +1869,14 @@ function wireMatchActions() {
   $('#btn-vote-no').addEventListener('click', () => {
     sound.playClick();
     match.castVote('no');
+    $('#parliament-overlay').hidden = true;
+    clearInterval(voteCountdownInterval);
+    voteCountdownInterval = null;
+  });
+
+  $('#btn-vote-abstain').addEventListener('click', () => {
+    sound.playClick();
+    match.castVote('abstain');
     $('#parliament-overlay').hidden = true;
     clearInterval(voteCountdownInterval);
     voteCountdownInterval = null;

@@ -5226,3 +5226,38 @@ body[data-screen="lobby"] .global-corner-icons {
   font: italic 400 17px var(--np-body);
   color: var(--ink-4);
 }
+
+/* ---------- Vote countdown, skipped turn, advanced-mode note ---------- */
+.turn-banner-timer {
+  flex: none;
+  padding: 2px 10px;
+  background: var(--ink);
+  color: var(--paper-2);
+  font: 900 16px var(--np-display);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.04em;
+}
+
+.turn-banner-timer[hidden] {
+  display: none;
+}
+
+.turn-banner.is-skipping {
+  background: var(--highlight);
+  border-color: var(--ink);
+  color: var(--ink);
+}
+
+.setting-note {
+  margin: 8px 0 0;
+  font: italic 400 13px var(--np-body);
+  color: var(--ink-4);
+}
+
+.parliament-actions {
+  flex-wrap: wrap;
+}
+
+.parliament-actions .menu-btn {
+  min-width: 90px;
+}

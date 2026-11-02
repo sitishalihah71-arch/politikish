@@ -203,6 +203,7 @@
             <span>Players: <strong id="lobby-settings-players">4</strong></span>
             <span>Rounds: <strong id="lobby-settings-rounds">10</strong></span>
             <span id="lobby-settings-events-badge" class="lobby-settings-events-badge">Events: ON</span>
+            <span id="lobby-settings-advanced-badge" class="lobby-settings-events-badge">Advanced: OFF</span>
           </div>
         </div>
 
@@ -228,6 +229,13 @@
                 <span class="switch-knob"></span>
               </button>
             </div>
+            <div class="setting-row">
+              <label for="setting-lobby-advanced">Advanced Mode</label>
+              <button id="setting-lobby-advanced" class="switch" type="button" role="switch" aria-checked="false">
+                <span class="switch-knob"></span>
+              </button>
+            </div>
+            <p class="setting-note">Advanced: no starting assets — buy them from the Black Market (limited stock, RM60,000, +50% Scandal).</p>
           </div>
           <button id="btn-lobby-add-bot" class="menu-btn menu-btn-secondary" type="button" hidden>
             <span class="menu-btn-label">Add Bot</span>
@@ -277,6 +285,7 @@
             <span id="match-turn-name">-</span>
           </div>
           <span class="turn-banner-hint" id="match-turn-hint"></span>
+          <span class="turn-banner-timer" id="match-vote-timer" hidden></span>
           <button id="btn-host-skip" class="host-skip-btn" type="button" hidden>Skip Turn</button>
         </div>
 
@@ -562,6 +571,9 @@
         <button id="btn-vote-no" class="menu-btn menu-btn-secondary" type="button">
           <span class="menu-btn-label">No</span>
         </button>
+        <button id="btn-vote-abstain" class="menu-btn menu-btn-secondary" type="button">
+          <span class="menu-btn-label">Abstain</span>
+        </button>
         <button id="btn-vote-yes" class="menu-btn menu-btn-primary" type="button">
           <span class="menu-btn-label">Yes</span>
         </button>
@@ -654,7 +666,7 @@
           <span class="howto-eyebrow">03 · Your Numbers</span>
           <h3>Reading Your Stats</h3>
           <div class="howto-stat-grid">
-            <div class="howto-stat-card"><div class="howto-stat-head"><span>💰</span><b>Money (Duit)</b></div><p>Spent on Kempen Imej and Black Market. Earned mainly from Projek. Lose 50% instantly if Scandal maxes out.</p></div>
+            <div class="howto-stat-card"><div class="howto-stat-head"><span>💰</span><b>Money (Duit)</b></div><p>Spent on Kempen Imej and (Advanced Mode) Black Market. Earned mainly from Projek. Lose 50% instantly if Scandal maxes out.</p></div>
             <div class="howto-stat-card"><div class="howto-stat-head"><span>⭐</span><b>Influence</b></div><p>Spent on Politik, Sabotaj, and Political Raid. Also earned from Projek.</p></div>
             <div class="howto-stat-card"><div class="howto-stat-head"><span>👍</span><b>Approval Rating</b></div><p>Public standing, starts at 50%. Decides who Parliament can target with a Vote of No Confidence.</p></div>
             <div class="howto-stat-card howto-stat-wide"><div class="howto-stat-head"><span>⚠️</span><b>Scandal</b></div>
@@ -674,8 +686,8 @@
             <div class="howto-action politik"><div class="howto-action-name">Politik</div><p>Guna influence untuk naik pangkat. Promotes into an EMPTY seat one rank up.</p><div class="howto-tags"><span>costs ⭐</span><span>needs open seat</span><span>% chance</span></div></div>
             <div class="howto-action sabotaj"><div class="howto-action-name">Sabotaj</div><p>Serang pemain lain untuk jatuhkan mereka. Steals an OCCUPIED seat one rank up.</p><div class="howto-tags"><span>costs ⭐</span><span>needs full seat</span><span>% chance</span></div></div>
             <div class="howto-action media"><div class="howto-action-name">Kempen Imej</div><p>Bayar media untuk kurangkan skandal anda. Or gain Influence / Public Support.</p><div class="howto-tags"><span>costs 💰</span><span>−⚠️ scandal</span></div></div>
-            <div class="howto-action raid"><div class="howto-action-name">Political Raid</div><p>Cuba rampas Aset Politik pemain lain. Risky bid to steal a rival's asset.</p><div class="howto-tags"><span>costs ⭐</span><span>% chance</span><span>steals asset</span></div></div>
-            <div class="howto-action market"><div class="howto-action-name">Black Market</div><p>Beli Aset Politik terus dengan duit. Guaranteed, no risk.</p><div class="howto-tags"><span>costs 💰</span><span>guaranteed</span></div></div>
+            <div class="howto-action raid"><div class="howto-action-name">Political Raid</div><p>Cuba rampas Aset Politik pemain lain. Risky bid to steal a rival's asset — you can't steal a type you already own (no duplicates).</p><div class="howto-tags"><span>costs ⭐</span><span>% chance</span><span>steals asset</span></div></div>
+            <div class="howto-action market"><div class="howto-action-name">Black Market</div><p>Advanced Mode sahaja. Beli Aset Politik terus: RM60,000 and +50% Scandal. Limited shared stock (2 items per player).</p><div class="howto-tags"><span>costs 💰</span><span>+50% scandal</span><span>limited stock</span></div></div>
           </div>
         </section>
 
@@ -688,7 +700,7 @@
         <section class="howto-section">
           <span class="howto-eyebrow">06 · Public &amp; Stealable</span>
           <h3>Political Assets</h3>
-          <p class="howto-lede">Permanent passive bonuses, visible to the whole table on purpose. Get one from the starting deal, Political Raid, or Black Market.</p>
+          <p class="howto-lede">Permanent passive bonuses, visible to the whole table on purpose. Normal match: everyone starts with 1 random asset. Advanced Mode: nobody does — buy from the Black Market (limited stock). Political Raid can steal a type you don't already own. Nobody holds two of the same asset.</p>
           <div class="howto-asset-list">
             <div class="howto-asset-row"><span>📺</span><b>Media Empire</b><span>Passive Influence every round.</span></div>
             <div class="howto-asset-row"><span>🏦</span><b>Corporate Sponsor</b><span>Extra Money from every Projek.</span></div>
@@ -706,7 +718,7 @@
             <div class="howto-badge-row"><span class="howto-badge howto-badge-shield">🛡️2</span><div><b>Public Support</b><p>Temporary shield from Kempen Imej. Number = turns left.</p></div></div>
             <div class="howto-badge-row"><span class="howto-badge howto-badge-icon">🕴️</span><div><b>KABEL</b><p>Secret legendary card. One-time use: challenge any occupied seat above you.</p></div></div>
             <div class="howto-badge-row"><span class="howto-badge howto-badge-icon">🎯</span><div><b>Secret Objective</b><p>Private goal with its own payout. Hidden from everyone else, even at match end.</p></div></div>
-            <div class="howto-badge-row"><span class="howto-badge howto-badge-icon">🏛️</span><div><b>Parliament Voting</b><p>Full-table Yes/No vote fires periodically. No vote = counted as "No".</p></div></div>
+            <div class="howto-badge-row"><span class="howto-badge howto-badge-icon">🏛️</span><div><b>Parliament Voting</b><p>Full-table vote fires periodically (90s timer). Yes / No / Abstain — if you don't vote you abstain, and abstentions aren't counted. Motion passes only if Yes beats No.</p></div></div>
           </div>
         </section>
 
@@ -733,7 +745,7 @@
             <li>In the lobby, the host taps <b>Add Bot</b> once per open seat — each click adds one, tagged <b>BOT</b>. A ✕ next to a bot removes it before the match starts.</li>
             <li>Bots take real turns — Projek, Politik, Sabotaj, Kempen Imej, Political Raid, Black Market — on a short visible delay.</li>
             <li>They'll send you Backroom Deal offers unprompted, and accept or reject offers you send them based on how good the offer is.</li>
-            <li>Bots never cast a Parliament vote — same rule as any silent human: it counts as a "No".</li>
+            <li>Bots never cast a Parliament vote — they abstain, so the vote doesn't wait for them.</li>
           </ul>
         </section>
 

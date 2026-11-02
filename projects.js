@@ -23,25 +23,38 @@ export function getProjectCard(id) {
   return PROJECT_CARDS.find((c) => c.id === id) || null;
 }
 
-// Mutates `player` directly. Returns the applied card for the caller to
-// surface as feedback. Money/influence rewards scale down slightly as the
-// table grows (see getEconomyScale) so a full room doesn't flood the
-// economy compared to a small one - scandal cost is untouched. Corporate
-// Sponsor (a Political Asset) stacks on top of that scaling as a further
-// money multiplier for its owner.
-export function resolveProjek(player, cardId, playerCount) {
-  const card = getProjectCard(cardId);
-  if (!card) return null;
-
+// The Money/Influence a player would actually receive from `card` right now:
+// the card's face values scaled by table size, with Corporate Sponsor
+// stacked on the Money side for its owner. Single source for both the
+// payout itself and every place the UI previews or reports it, so what is
+// shown always matches what is paid.
+export function getProjekReward(player, card, playerCount) {
   const scale = getEconomyScale(playerCount);
   const sponsorBonus = hasAsset(player, 'corporateSponsor')
     ? 1 + GAME_BALANCE.politicalOpportunity.assets.corporateSponsor.projekMoneyBonusPercent / 100
     : 1;
-  player.money += Math.round(card.money * scale * sponsorBonus);
-  player.influence += Math.round(card.influence * scale);
+  return {
+    money: Math.round(card.money * scale * sponsorBonus),
+    influence: Math.round(card.influence * scale),
+    sponsorBoosted: sponsorBonus > 1,
+  };
+}
+
+// Mutates `player` directly. Returns the applied card plus the rewards
+// actually paid for the caller to surface as feedback. Money/influence
+// rewards scale down slightly as the table grows (see getEconomyScale) so a
+// full room doesn't flood the economy compared to a small one - scandal
+// cost is untouched.
+export function resolveProjek(player, cardId, playerCount) {
+  const card = getProjectCard(cardId);
+  if (!card) return null;
+
+  const reward = getProjekReward(player, card, playerCount);
+  player.money += reward.money;
+  player.influence += reward.influence;
   applyScandalDelta(player, card.scandal);
   applyApprovalDelta(player, GAME_BALANCE.approvalRating.projekGain);
   player.stats.projectsCompleted += 1;
   player.politicalNetwork[card.category] += 1;
-  return card;
+  return { ...card, reward };
 }

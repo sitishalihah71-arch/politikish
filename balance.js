@@ -42,6 +42,7 @@ export const GAME_BALANCE = {
     defaultRounds: 10,
     defaultNationalEvents: true,
     defaultParliamentVoting: true,
+    defaultAdvancedMode: false,
   },
 
   // Seat capacity per rank is derived from the live player count (N) as
@@ -134,6 +135,7 @@ export const GAME_BALANCE = {
     leakScandalWeightPercent: 60,
     leakMaxChance: 90,
     skipTurnsOnLeak: 1,
+    skipNoticeMs: 2500, // how long the "turn skipped" notice stays up before play moves on
   },
 
   // Approval Rating is a second public-standing meter alongside Scandal
@@ -160,13 +162,16 @@ export const GAME_BALANCE = {
     voteDurationMs: 90000,
   },
 
-  // Black Market: the guaranteed, Money-priced counterpart to Political
-  // Raid's risky, Influence-priced theft - same asset pool, a different
-  // resource and a different risk profile. One flat price for every asset
-  // type; a first pass doesn't need per-type balancing.
+  // Black Market (Advanced Mode only): the guaranteed, Money-priced
+  // counterpart to Political Raid's risky, Influence-priced theft. In
+  // Advanced Mode nobody starts with a Political Asset - they have to be
+  // bought here, from a stock shared by the whole table and capped at
+  // `stockPerPlayer` items per player in the room. Buying is expensive and
+  // dirty: flat price, plus a Scandal hit.
   blackMarket: {
-    price: 8000,
-    offerCount: 3,
+    price: 60000,
+    scandalGain: 50,
+    stockPerPlayer: 2,
   },
 
   // Bot players: AI-controlled seats so a single human can fill a match.

@@ -23,7 +23,7 @@ import { generateMediaOffers, resolveMedia } from './media.js';
 import { resolvePolitik } from './politics.js';
 import { resolveSabotaj } from './sabotage.js';
 import { pickNationalEvent, applyNationalEvent } from './events.js';
-import { dealStartingAssets, hasAsset, resolveRaid, generateMarketOffers, buyAsset } from './politicalOpportunities.js';
+import { dealStartingAssets, generateMarketStock, hasAsset, resolveRaid, generateMarketOffers, buyAsset } from './politicalOpportunities.js';
 import { proposeDeal, respondToDeal, resetDeals } from './backroomDeals.js';
 import { PARLIAMENT_MOTIONS, pickMotion, applyMotion } from './parliament.js';
 import { assignSecretObjective, checkSecretObjective } from './objectives.js';
@@ -68,13 +68,32 @@ function postNews({ icon, headline, description }) {
 // Parliament Voting: while `pendingVote` is set, every turn-gated action is
 // blocked (see isActivePlayerId below) - the whole table pauses for this,
 // unlike every other mechanic in the game which only ever gates one actor.
-// `votes` is playerId -> 'yes'|'no'; anyone not in it by resolution time
-// (including a disconnected player) counts as a "no". `voteTimer` is the
-// host-side force-resolve clock; a vote also resolves early the moment
-// every currently-connected player has cast one.
+// `votes` is playerId -> 'yes'|'no'|'abstain'; anyone not in it by
+// resolution time (including a disconnected player) is an abstention and
+// is left out of the count entirely. `voteTimer` is the host-side
+// force-resolve clock; a vote also resolves early the moment every
+// connected *human* has cast one (bots never vote, so they can't hold it up).
 let pendingVote = null;
 let voteSeq = 0;
 let voteTimer = null;
+
+// True for the short window in which a benched player's turn has "come up"
+// but is being auto-skipped (Backroom Deal leak). Every turn-gated action is
+// refused during it and the UI shows a skip banner instead of "your turn".
+let turnSkipping = false;
+
+// Advanced Mode: nobody starts with a Political Asset; the Black Market is
+// the only source, from a finite table-wide `marketStock` (a list of asset
+// types, one entry per copy left). Both are public, so both ride along in
+// every broadcast.
+let advancedMode = false;
+let marketStock = [];
+
+// Media Empire pays its owners at each round boundary with no action behind
+// it, so it has no `lastAction` of its own. This is the passive equivalent:
+// the most recent payout, with a seq so the UI logs each one exactly once.
+let passivePayout = null;
+let passiveSeq = 0;
 
 function isHostRole() {
   return room.getRoomSnapshot().isHost;
@@ -121,6 +140,10 @@ export function getMatchSnapshot() {
     lastPenalized,
     pendingNews,
     pendingVote,
+    skipping: turnSkipping,
+    advancedMode,
+    marketStock: [...marketStock],
+    passivePayout,
   };
 }
 
@@ -135,7 +158,11 @@ function buildBroadcastPayloadFor(viewerId) {
     lastAction,
     lastPenalized,
     pendingNews,
-    pendingVote,
+    pendingVote: pendingVote ? { ...pendingVote, remainingMs: Math.max(0, pendingVote.deadline - Date.now()) } : null,
+    skipping: turnSkipping,
+    advancedMode,
+    marketStock: [...marketStock],
+    passivePayout,
   };
 }
 
@@ -216,27 +243,29 @@ function maybeTriggerParliamentSession(completedRound, players) {
 
 // Any connected player can cast a vote while one is open - not gated by
 // whose turn it is, same precedent as Backroom Deals. Resolves immediately
-// once every currently-connected player has voted, instead of waiting out
-// the full timer; a player who disconnects mid-vote simply drops out of
-// that "everyone" check rather than blocking resolution.
+// once every connected human has voted, instead of waiting out the full
+// timer; a player who disconnects mid-vote simply drops out of that
+// "everyone" check rather than blocking resolution, and bots (which never
+// vote) aren't waited on at all.
 function hostCastVote(playerId, choice) {
   if (!pendingVote) return;
   const players = room.getPlayersLive();
   const player = players.find((p) => p.id === playerId);
-  if (!player || !player.connected) return;
+  if (!player || !player.connected || player.isBot) return;
 
-  pendingVote.votes[playerId] = choice === 'yes' ? 'yes' : 'no';
+  pendingVote.votes[playerId] = choice === 'yes' || choice === 'no' ? choice : 'abstain';
 
-  const stillWaiting = players.some((p) => p.connected && !pendingVote.votes[p.id]);
+  const stillWaiting = players.some((p) => p.connected && !p.isBot && !pendingVote.votes[p.id]);
   if (!stillWaiting) resolveVote();
 }
 
-// Tallies yes vs no - anyone without a recorded vote (never voted, or
-// disconnected before casting one) counts as a "no", so a silent table
-// never accidentally passes a motion. Applies the motion only if it
-// passed, posts the result through the same News surface every other
-// announcement in this game already uses, then clears pendingVote so the
-// turn that was already computed underneath becomes interactive again.
+// Tallies Yes vs No - everyone else (an explicit abstain, never voted, bots,
+// or disconnected before casting) is an abstention and doesn't count either
+// way. The motion passes only on a strict Yes majority, so a tie or a fully
+// silent table never passes it. Applies the motion only if it passed, posts
+// the result through the same News surface every other announcement in this
+// game already uses, then clears pendingVote so the turn that was already
+// computed underneath becomes interactive again.
 function resolveVote() {
   if (!pendingVote) return;
   clearTimeout(voteTimer);
@@ -245,7 +274,8 @@ function resolveVote() {
   const vote = pendingVote;
   const players = room.getPlayersLive();
   const yesCount = players.filter((p) => vote.votes[p.id] === 'yes').length;
-  const noCount = players.length - yesCount;
+  const noCount = players.filter((p) => vote.votes[p.id] === 'no').length;
+  const abstainCount = players.length - yesCount - noCount;
   const passed = yesCount > noCount;
 
   const motion = PARLIAMENT_MOTIONS.find((m) => m.id === vote.motionId);
@@ -258,7 +288,7 @@ function resolveVote() {
   postNews({
     icon: '🏛️',
     headline: passed ? 'MOTION PASSED' : 'MOTION FAILED',
-    description: `${vote.name} — ${passed ? 'Passed' : 'Failed'} (${yesCount} Yes, ${noCount} No). ${vote.description}${outcomeNote}`,
+    description: `${vote.name} — ${passed ? 'Passed' : 'Failed'} (${yesCount} Yes, ${noCount} No, ${abstainCount} Abstain). ${vote.description}${outcomeNote}`,
   });
   // Clears pendingVote above already ran; now settle whatever the turn
   // state underneath actually is. If the player now up disconnected while
@@ -279,9 +309,17 @@ function resolveVote() {
 function applyMediaEmpirePassive(completedRound, players) {
   if (completedRound === null) return;
   const bonus = GAME_BALANCE.politicalOpportunity.assets.mediaEmpire.influencePerRound;
+  const ownerIds = [];
   players.forEach((p) => {
-    if (hasAsset(p, 'mediaEmpire')) p.influence += bonus;
+    if (hasAsset(p, 'mediaEmpire')) {
+      p.influence += bonus;
+      ownerIds.push(p.id);
+    }
   });
+  if (ownerIds.length > 0) {
+    passiveSeq += 1;
+    passivePayout = { seq: passiveSeq, assetType: 'mediaEmpire', ownerIds, amount: bonus, round: completedRound };
+  }
 }
 
 // Turn order cycles through whichever slots are actually present, sorted
@@ -296,6 +334,7 @@ function applyMediaEmpirePassive(completedRound, players) {
 // one exception: the turn a Media card just granted/refreshed the shield,
 // which must not immediately eat into the duration it just set.
 function advanceTurn({ skipSupportTick = false } = {}) {
+  turnSkipping = false;
   const players = room.getPlayersLive();
   const endingPlayer = players.find((p) => p.slot === turnSlot);
   if (endingPlayer) {
@@ -370,9 +409,16 @@ function settleTurnState() {
   const newActive = getActivePlayer(room.getPlayersLive());
   if (newActive && newActive.skipNextTurn) {
     newActive.skipNextTurn = false;
+    turnSkipping = true;
     setLastAction({ type: 'skip', actorId: newActive.id, reason: 'bribery-leak' });
     broadcastMatchUpdate();
-    setTimeout(() => advanceTurn(), 1500);
+    const skippedSlot = turnSlot;
+    // Re-checked on firing: a disconnect (or anything else) may already have
+    // moved the turn on, in which case advancing again would skip an
+    // innocent player.
+    setTimeout(() => {
+      if (turnSkipping && turnSlot === skippedSlot) advanceTurn();
+    }, GAME_BALANCE.backroomDeals.skipNoticeMs);
     return;
   }
 
@@ -408,7 +454,7 @@ function resolveBotTurn(botId) {
   const offers = {
     projekOffers: generateProjectOffers(),
     mediaOffers: generateMediaOffers(),
-    marketOffers: generateMarketOffers(bot),
+    marketOffers: advancedMode ? generateMarketOffers(bot, marketStock) : [],
   };
   const action = decideBotAction(bot, players, offers);
   const noop = () => {};
@@ -423,9 +469,11 @@ function resolveBotTurn(botId) {
 
 // A pending vote pauses every turn-gated action for the whole table, not
 // just the active player - so this returns false for everyone while
-// `pendingVote` is set, exactly as if nobody's turn was active.
+// `pendingVote` is set, exactly as if nobody's turn was active. The same
+// goes for a turn that is being auto-skipped: it is nominally someone's
+// turn, but they must not be able to act on it.
 function isActivePlayerId(playerId) {
-  if (pendingVote) return false;
+  if (pendingVote || turnSkipping) return false;
   const active = getActivePlayer(room.getPlayersLive());
   return active && active.id === playerId;
 }
@@ -502,6 +550,7 @@ function hostResolvePolitik(playerId, extraInfluence, respond) {
   setLastAction({
     type: 'politik',
     actorId: playerId,
+    partyMachinery: hasAsset(player, 'partyMachinery'),
     success: result.success,
     chance: result.chance,
     cost: result.cost,
@@ -547,6 +596,7 @@ function hostResolveSabotaj(playerId, targetId, extraInfluence, respond) {
     cost: result.cost,
     toRank: result.toRank,
     isKabel: result.isKabel,
+    targetRoyal: hasAsset(target, 'royalConnection'),
   });
   advanceTurn();
 }
@@ -581,19 +631,27 @@ function hostResolveMarketOffers(playerId, respond) {
   if (!isActivePlayerId(playerId)) return;
   const player = room.getPlayersLive().find((p) => p.id === playerId);
   if (!player) return;
-  respond({ type: 'market-offers', payload: { offers: generateMarketOffers(player) } });
+  if (!advancedMode) {
+    respond({ type: 'action-rejected', payload: { reason: 'market-closed' } });
+    return;
+  }
+  respond({ type: 'market-offers', payload: { offers: generateMarketOffers(player, marketStock) } });
 }
 
 function hostResolveMarketPurchase(playerId, assetType, respond) {
   if (!isActivePlayerId(playerId)) return;
   const player = room.getPlayersLive().find((p) => p.id === playerId);
   if (!player) return;
-  const result = buyAsset(player, assetType);
+  if (!advancedMode) {
+    respond({ type: 'action-rejected', payload: { reason: 'market-closed' } });
+    return;
+  }
+  const result = buyAsset(player, assetType, marketStock);
   if (!result.ok) {
     respond({ type: 'action-rejected', payload: { reason: result.reason } });
     return;
   }
-  setLastAction({ type: 'market', actorId: playerId, assetType: result.assetType, price: result.price });
+  setLastAction({ type: 'market', actorId: playerId, assetType: result.assetType, price: result.price, scandalGain: result.scandalGain });
   advanceTurn();
 }
 
@@ -738,7 +796,13 @@ function handleClientMatchMessage(type, payload) {
     lastAction = payload.lastAction;
     lastPenalized = payload.lastPenalized || [];
     pendingNews = payload.pendingNews || null;
-    pendingVote = payload.pendingVote || null;
+    // The host's clock isn't ours, so the countdown is rebuilt from the
+    // time-remaining it sent rather than from its absolute deadline.
+    pendingVote = payload.pendingVote ? { ...payload.pendingVote, deadline: Date.now() + payload.pendingVote.remainingMs } : null;
+    turnSkipping = Boolean(payload.skipping);
+    advancedMode = Boolean(payload.advancedMode);
+    marketStock = payload.marketStock || [];
+    passivePayout = payload.passivePayout || null;
     bus.emit('match:updated', getMatchSnapshot());
   } else if (type === 'projek-offers') {
     bus.emit('match:offers', { action: 'projek', offers: payload.offers });
@@ -840,7 +904,7 @@ export function attemptRaid(targetId, assetId, extraInfluence) {
 export function requestMarketOffers() {
   if (isHostRole()) {
     const player = room.getPlayersLive().find((p) => p.id === room.getRoomSnapshot().localPlayerId);
-    bus.emit('match:offers', { action: 'market', offers: player ? generateMarketOffers(player) : [] });
+    bus.emit('match:offers', { action: 'market', offers: player && advancedMode ? generateMarketOffers(player, marketStock) : [] });
   } else {
     multiplayer.send({ type: 'market-start' });
   }
@@ -906,17 +970,26 @@ bus.on('room:match-started', () => {
   kabelClaimed = false;
   pendingNews = null;
   pendingVote = null;
+  turnSkipping = false;
+  passivePayout = null;
   clearTimeout(voteTimer);
   voteTimer = null;
   resetDeals();
 
   const roomSnap = room.getRoomSnapshot();
   maxRounds = roomSnap.settings.rounds;
+  advancedMode = Boolean(roomSnap.settings.advancedMode);
+  marketStock = [];
 
   if (isHostRole()) {
     const players = room.getPlayersLive();
     players.forEach(initMatchState);
-    dealStartingAssets(players);
+    if (advancedMode) {
+      marketStock = generateMarketStock(players.length);
+      players.forEach((p) => { p.assets = []; });
+    } else {
+      dealStartingAssets(players);
+    }
     players.forEach(assignSecretObjective);
     currentRound = 1;
     const bySlot = [...players].sort((a, b) => a.slot - b.slot);
@@ -958,6 +1031,10 @@ export function resetMatch() {
   kabelClaimed = false;
   pendingNews = null;
   pendingVote = null;
+  turnSkipping = false;
+  advancedMode = false;
+  marketStock = [];
+  passivePayout = null;
   clearTimeout(voteTimer);
   voteTimer = null;
   resetDeals();

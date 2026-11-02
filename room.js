@@ -23,6 +23,7 @@ function defaultSettings() {
     rounds: GAME_BALANCE.room.defaultRounds,
     nationalEvents: GAME_BALANCE.room.defaultNationalEvents,
     parliamentVoting: GAME_BALANCE.room.defaultParliamentVoting,
+    advancedMode: GAME_BALANCE.room.defaultAdvancedMode,
   };
 }
 
@@ -292,6 +293,7 @@ export function updateSettings(partial) {
   if (GAME_BALANCE.room.roundOptions.includes(partial.rounds)) next.rounds = partial.rounds;
   if (typeof partial.nationalEvents === 'boolean') next.nationalEvents = partial.nationalEvents;
   if (typeof partial.parliamentVoting === 'boolean') next.parliamentVoting = partial.parliamentVoting;
+  if (typeof partial.advancedMode === 'boolean') next.advancedMode = partial.advancedMode;
   gameSettings = next;
   broadcastRoomUpdate();
   bus.emit('room:updated', getRoomSnapshot());

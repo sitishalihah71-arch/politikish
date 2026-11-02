@@ -1,8 +1,11 @@
 // Political Assets: permanent, publicly-visible bonuses (the opposite of
 // KABEL/Political Network - the whole point is other players can see
-// what's worth raiding from you). Each player is dealt at most one at match
-// start; Political Raid is the only way ownership changes afterward -
-// assets are never destroyed, only reassigned.
+// what's worth raiding from you). In a normal match each player is dealt
+// one at match start; in Advanced Mode nobody starts with any and they are
+// bought from the Black Market instead. Political Raid is the other way
+// ownership changes - assets are never destroyed, only reassigned. A
+// player never holds two of the same type (Raid and Black Market both
+// refuse it).
 //
 // The spec's `activate()` idea doesn't survive going over the wire (WebRTC
 // data channels can't serialize functions), so an asset is plain data
@@ -11,7 +14,8 @@
 // politics.js's resolve functions already are.
 
 import { GAME_BALANCE } from './balance.js';
-import { shuffle, pickRandomUnique } from './utils.js';
+import { shuffle, randomChoice } from './utils.js';
+import { applyScandalDelta } from './effects.js';
 
 export const ASSET_TYPES = ['mediaEmpire', 'corporateSponsor', 'partyMachinery', 'royalConnection'];
 
@@ -46,15 +50,36 @@ export function createAsset(type, ownerId) {
   };
 }
 
-// One random distinct asset per player at match start (host-only). With
-// more players than asset types, the extras simply start with none - an
-// intentional reason to Raid early rather than a bug.
+// Normal (non-Advanced) match start, host-only: every player gets exactly
+// one random asset. Types are dealt from a reshuffled deck, so with up to
+// four players nobody shares a type; with more players than types the deck
+// simply restarts (different players may then own the same type - the
+// no-duplicates rule is per player, not per table).
 export function dealStartingAssets(players) {
-  const shuffledTypes = shuffle(ASSET_TYPES);
-  players.forEach((player, i) => {
-    const type = shuffledTypes[i];
-    player.assets = type ? [createAsset(type, player.id)] : [];
+  let deck = [];
+  players.forEach((player) => {
+    if (deck.length === 0) deck = shuffle(ASSET_TYPES);
+    player.assets = [createAsset(deck.pop(), player.id)];
   });
+}
+
+// Advanced Mode match start: the whole table starts empty-handed and the
+// Black Market is the only source. Stock is limited to `stockPerPlayer`
+// items per player, picked at random, with no single type exceeding the
+// player count (more copies than players could never all be bought, since
+// nobody may own two of a type).
+export function generateMarketStock(playerCount) {
+  const total = playerCount * GAME_BALANCE.blackMarket.stockPerPlayer;
+  const counts = Object.fromEntries(ASSET_TYPES.map((type) => [type, 0]));
+  const stock = [];
+  while (stock.length < total) {
+    const open = ASSET_TYPES.filter((type) => counts[type] < playerCount);
+    if (open.length === 0) break;
+    const type = randomChoice(open);
+    counts[type] += 1;
+    stock.push(type);
+  }
+  return stock;
 }
 
 export function hasAsset(player, type) {
@@ -84,12 +109,13 @@ export function getRaidCost(extraInfluence) {
   return raidCfg.cost + steps * raidCfg.extraInfluenceStep;
 }
 
-// reason codes: 'invalid-target' | 'insufficient-influence'
+// reason codes: 'invalid-target' | 'duplicate-asset' | 'insufficient-influence'
 export function validateRaid(attacker, target, assetId, extraInfluence) {
   const asset = target?.assets.find((a) => a.id === assetId);
   if (!target || target.id === attacker.id || !asset) {
     return { ok: false, reason: 'invalid-target' };
   }
+  if (hasAsset(attacker, asset.type)) return { ok: false, reason: 'duplicate-asset' };
   const cost = getRaidCost(extraInfluence);
   if (attacker.influence < cost) return { ok: false, reason: 'insufficient-influence' };
   return { ok: true, cost, asset };
@@ -124,29 +150,33 @@ export function getMarketPrice() {
   return marketCfg.price;
 }
 
-// Only offers types the buyer doesn't already own - a duplicate of
-// something Raid could otherwise steal isn't an interesting purchase.
-// Returns fewer than `offerCount` once fewer types remain, and an empty
-// array once the buyer already owns all of them.
-export function generateMarketOffers(player) {
-  const available = ASSET_TYPES.filter((type) => !hasAsset(player, type));
-  return pickRandomUnique(available, Math.min(marketCfg.offerCount, available.length));
+// Every distinct type still in stock that the buyer doesn't already own -
+// a copy of something they hold is never offered, and the type comes off
+// the list once the last copy is bought. Order follows ASSET_TYPES so the
+// picker doesn't reshuffle between opens.
+export function generateMarketOffers(player, stock) {
+  return ASSET_TYPES.filter((type) => stock.includes(type) && !hasAsset(player, type));
 }
 
-// reason codes: 'already-owned' | 'insufficient-money'
-export function validateMarketPurchase(player, type) {
+// reason codes: 'already-owned' | 'out-of-stock' | 'insufficient-money'
+export function validateMarketPurchase(player, type, stock) {
   if (!ASSET_TYPES.includes(type) || hasAsset(player, type)) return { ok: false, reason: 'already-owned' };
+  if (!stock.includes(type)) return { ok: false, reason: 'out-of-stock' };
   if (player.money < marketCfg.price) return { ok: false, reason: 'insufficient-money' };
   return { ok: true, price: marketCfg.price };
 }
 
-export function buyAsset(player, type) {
-  const validation = validateMarketPurchase(player, type);
+// Takes one copy out of `stock` (mutated in place - it's the table-wide
+// supply), charges the price, and adds the Scandal hit that makes this the
+// dirty route compared to Raid.
+export function buyAsset(player, type, stock) {
+  const validation = validateMarketPurchase(player, type, stock);
   if (!validation.ok) return validation;
 
+  stock.splice(stock.indexOf(type), 1);
   player.money -= validation.price;
-  const asset = createAsset(type, player.id);
-  player.assets.push(asset);
+  const scandalGain = applyScandalDelta(player, marketCfg.scandalGain);
+  player.assets.push(createAsset(type, player.id));
 
-  return { ok: true, assetType: type, price: validation.price };
+  return { ok: true, assetType: type, price: validation.price, scandalGain };
 }
