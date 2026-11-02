@@ -254,6 +254,9 @@ export function leaveRoom() {
   players = [];
   gameSettings = defaultSettings();
   clearSession();
+  // Lets match.js and ui.js drop any leftover match state, so the next room
+  // starts from a clean slate however the player left (menu, host lost...).
+  bus.emit('room:left');
 }
 
 export function updateLocalAvatar(avatar) {

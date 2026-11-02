@@ -455,6 +455,7 @@ function wireRoomEvents() {
 
   bus.on('room:host-disconnected', () => {
     showToast('The host ended the match.');
+    room.leaveRoom();
     showScreen('main-menu');
   });
 }
@@ -1804,9 +1805,10 @@ function wireMatchActions() {
     currentIncomingDeal = null;
   });
 
-  $('#btn-match-end-menu').addEventListener('click', () => {
-    room.leaveRoom();
-    match.resetMatch();
+  // Leaving a room by any route (menu button, host lost, back buttons) must
+  // clear the match-screen bookkeeping, or the next match never switches
+  // screens and Start Match looks like it does nothing.
+  bus.on('room:left', () => {
     hasEnteredMatchScreen = false;
     hasEnteredMatchEndScreen = false;
     lastHandledActionSeq = -1;
@@ -1817,6 +1819,11 @@ function wireMatchActions() {
     voteCountdownInterval = null;
     wasMyTurn = false;
     hadKabel = false;
+    hideActionStory();
+  });
+
+  $('#btn-match-end-menu').addEventListener('click', () => {
+    room.leaveRoom();
     showScreen('main-menu');
   });
 

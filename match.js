@@ -1010,6 +1010,8 @@ bus.on('room:match-started', () => {
   }
 });
 
+bus.on('room:left', () => resetMatch());
+
 // Keep the match in sync with room-level connection changes (disconnect,
 // reconnect) - auto-skip the active player's turn if they just dropped, or
 // simply re-broadcast so everyone's "reconnecting..." state stays current.
