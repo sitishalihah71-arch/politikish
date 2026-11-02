@@ -1206,8 +1206,20 @@ body[data-screen="match"] .global-corner-icons .icon-btn:hover {
   border-top: 0;
 }
 
+.feed-hint {
+  margin: -4px 0 8px;
+  font: 600 12px var(--np-condensed);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-4);
+}
+
 .feed-item.is-replayable {
   cursor: pointer;
+}
+
+.feed-item.is-replayable .feed-meta::after {
+  content: ' · BACA ▸';
 }
 
 .feed-item.is-replayable:hover .feed-text,

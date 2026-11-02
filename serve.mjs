@@ -4,6 +4,7 @@ import path from 'node:path';
 import url from 'node:url';
 
 const ROOT = path.dirname(url.fileURLToPath(import.meta.url));
+const PORT = Number(process.env.PORT) || 8843;
 const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json' };
 
 http.createServer((req, res) => {
@@ -16,7 +17,11 @@ http.createServer((req, res) => {
       return;
     }
     const ext = path.extname(filePath);
-    res.writeHead(200, { 'Content-Type': TYPES[ext] || 'application/octet-stream' });
+    res.writeHead(200, {
+      'Content-Type': TYPES[ext] || 'application/octet-stream',
+      // Dev server: never let the browser reuse an older ui.js / style.css.
+      'Cache-Control': 'no-store',
+    });
     res.end(data);
   });
-}).listen(8843, () => console.log('serving on 8843'));
+}).listen(PORT, () => console.log(`serving on ${PORT}`));
