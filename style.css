@@ -5124,3 +5124,105 @@ body[data-screen="lobby"] .global-corner-icons {
     padding: 0 16px;
   }
 }
+
+/* The corner icons are fixed, so on screens that scroll something must sit
+   under them: match end keeps its masthead pinned, and the phone lobby gets
+   a paper strip so rows don't slide beneath the buttons. */
+.match-end-head {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  background: var(--paper);
+}
+
+@media (max-width: 860px) {
+  #screen-lobby::before {
+    content: '';
+    flex: none;
+    position: sticky;
+    top: 0;
+    z-index: 4;
+    height: 60px;
+    margin: 0 -16px;
+    background: var(--paper);
+  }
+
+  .lobby-header {
+    padding-top: 0;
+  }
+}
+
+#screen-match-end .match-end-panel,
+#screen-lobby .lobby-panel {
+  flex: none;
+}
+
+.action-chips span:empty {
+  display: none;
+}
+
+/* Customize: pick from a grid of options, each previewed with the rest of
+   the current look. The arrow buttons stay as a quick way to cycle. */
+.customize-panel {
+  width: min(560px, 100%);
+}
+
+.customize-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(72px, 1fr));
+  gap: 8px;
+}
+
+.customize-option {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 6px 2px 5px;
+  background: var(--paper-3);
+  border: 2px solid var(--ink);
+  box-shadow: 2px 2px 0 var(--ink);
+  color: var(--ink);
+}
+
+.customize-option svg {
+  width: 44px;
+  height: 58px;
+}
+
+.customize-option span {
+  font: 700 13px var(--np-condensed);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.customize-option:hover {
+  background: #f1e08a;
+}
+
+.customize-option[aria-pressed="true"] {
+  background: #f3dfa0;
+  box-shadow: 0 0 0 3px var(--np-red), 2px 2px 0 3px var(--ink);
+}
+
+.customize-option:active {
+  transform: translate(2px, 2px);
+  box-shadow: none;
+}
+
+.lobby-player-row.is-empty {
+  opacity: 1;
+}
+
+.lobby-empty-ring {
+  width: 48px;
+  height: 48px;
+  flex: none;
+  border: 2px dashed var(--ink-4);
+  border-radius: 50%;
+}
+
+.lobby-empty-text {
+  font: italic 400 17px var(--np-body);
+  color: var(--ink-4);
+}

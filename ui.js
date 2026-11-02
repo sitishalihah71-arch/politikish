@@ -184,8 +184,35 @@ function currentLocalAvatar() {
 
 function renderCustomizePreview() {
   $('#customize-preview').innerHTML = renderAvatarSVG(draftAvatar, 110);
-  $('#customize-hair-label').textContent = HAIR_STYLES[draftAvatar.hair].name;
-  $('#customize-face-label').textContent = FACE_STYLES[draftAvatar.face].name;
+  $('#customize-hair-label').textContent = `${HAIR_STYLES[draftAvatar.hair].name} · ${draftAvatar.hair + 1}/${HAIR_STYLES.length}`;
+  $('#customize-face-label').textContent = `${FACE_STYLES[draftAvatar.face].name} · ${draftAvatar.face + 1}/${FACE_STYLES.length}`;
+  renderCustomizeGrid('#customize-hair-grid', HAIR_STYLES, 'hair');
+  renderCustomizeGrid('#customize-face-grid', FACE_STYLES, 'face');
+}
+
+// Every option is shown wearing the rest of the current draft, so the grid
+// doubles as a preview of what each pick would look like.
+function renderCustomizeGrid(selector, styles, key) {
+  const grid = $(selector);
+  grid.innerHTML = '';
+  styles.forEach((style, index) => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'customize-option';
+    btn.setAttribute('aria-pressed', String(draftAvatar[key] === index));
+    btn.setAttribute('aria-label', style.name);
+    btn.innerHTML = renderAvatarSVG({ ...draftAvatar, [key]: index }, 44);
+    const label = document.createElement('span');
+    label.textContent = style.name;
+    btn.appendChild(label);
+    btn.addEventListener('click', () => {
+      sound.playClick();
+      draftAvatar = { ...draftAvatar, [key]: index };
+      renderCustomizePreview();
+      room.updateLocalAvatar(draftAvatar);
+    });
+    grid.appendChild(btn);
+  });
 }
 
 function enterCustomizeScreen() {
@@ -307,6 +334,20 @@ function renderLobby(snapshot) {
 
       listEl.appendChild(li);
     });
+
+  // Open seats stay visible so the table's size reads at a glance.
+  for (let i = snapshot.players.length; i < snapshot.settings.maxPlayers; i++) {
+    const li = document.createElement('li');
+    li.className = 'lobby-player-row is-empty';
+    const ring = document.createElement('div');
+    ring.className = 'lobby-empty-ring';
+    li.appendChild(ring);
+    const text = document.createElement('span');
+    text.className = 'lobby-empty-text';
+    text.textContent = 'Kosong. Menunggu pemain atau bot.';
+    li.appendChild(text);
+    listEl.appendChild(li);
+  }
 
   const me = findLocalPlayer(snapshot);
   const readyBtn = $('#btn-lobby-ready');
@@ -691,9 +732,45 @@ function renderActionPanel(snapshot) {
     $('#approval-bar-fill').style.width = `${approvalPct}%`;
   }
 
+  renderActionChips(localPlayer);
   renderStatusAssets(localPlayer);
   renderPoliticalNetwork(localPlayer);
   renderSecretObjective(localPlayer);
+}
+
+// The action cards advertise what they'd cost right now (a base attempt with
+// no extra Influence) so the dock reads at a glance; the attempt modal still
+// has the real sliders. Projek/Kempen Imej keep their static labels - the
+// first never costs anything and the second's price depends on the card dealt.
+function setActionChips(buttonId, labels) {
+  const chips = $$(`#${buttonId} .action-chips span`);
+  labels.forEach((label, i) => {
+    if (chips[i]) chips[i].textContent = label;
+  });
+}
+
+function renderActionChips(localPlayer) {
+  if (!localPlayer) return;
+  const rank = localPlayer.rank;
+  const percent = (value) => `${Math.round(value * 100)}%`;
+
+  if (politics.PROMOTION_TABLE[rank]) {
+    const hasMachinery = (localPlayer.assets || []).some((a) => a.type === 'partyMachinery');
+    setActionChips('btn-action-politik', [
+      `${politics.getPolitikCost(rank, 0)} Inf`,
+      percent(politics.calculatePolitikChance(rank, 0, hasMachinery)),
+    ]);
+    setActionChips('btn-action-sabotaj', [
+      `${sabotage.getSabotajCost(rank, 0)} Inf`,
+      percent(sabotage.SABOTAGE_TABLE[rank].baseChance),
+    ]);
+  } else {
+    setActionChips('btn-action-politik', ['Pangkat tertinggi', '']);
+    setActionChips('btn-action-sabotaj', ['Pangkat tertinggi', '']);
+  }
+
+  setActionChips('btn-action-raid', [`${opportunities.getRaidCost(0)} Inf`, percent(opportunities.describeRaidChance(0).base)]);
+  setActionChips('btn-action-market', [formatMoney(GAME_BALANCE.blackMarket.price), 'Pasti']);
 }
 
 // Secret Objective data only ever appears on the local player's own entry
