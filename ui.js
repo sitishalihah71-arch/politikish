@@ -1767,8 +1767,13 @@ function wireMatchActions() {
     const snapshot = match.getMatchSnapshot();
     const localPlayer = findLocalPlayer(snapshot);
     const ownedTypes = new Set((localPlayer.assets || []).map((a) => a.type));
-    if (opportunities.ASSET_TYPES.every((type) => ownedTypes.has(type))) {
-      showToast('You already own every Political Asset.');
+    const stock = snapshot.marketStock || [];
+    if (stock.length === 0) {
+      showToast('The Black Market is sold out.');
+      return;
+    }
+    if (stock.every((type) => ownedTypes.has(type))) {
+      showToast('Nothing left in stock that you don\'t already own.');
       return;
     }
     match.requestMarketOffers();
@@ -1891,7 +1896,7 @@ function wireMatchEvents() {
     // auto-skipped in the meantime) - ignore it rather than popping the
     // picker open on a turn that isn't active anymore.
     const snapshot = match.getMatchSnapshot();
-    if (snapshot.activePlayerId !== snapshot.localPlayerId) return;
+    if (snapshot.activePlayerId !== snapshot.localPlayerId || snapshot.skipping || snapshot.pendingVote) return;
     openOffersModal(e.detail.action, e.detail.offers);
   });
   bus.on('match:action-rejected', (e) => {
@@ -1899,7 +1904,7 @@ function wireMatchEvents() {
   });
   bus.on('match:sabotaj-options', (e) => {
     const snapshot = match.getMatchSnapshot();
-    if (snapshot.activePlayerId !== snapshot.localPlayerId) return;
+    if (snapshot.activePlayerId !== snapshot.localPlayerId || snapshot.skipping || snapshot.pendingVote) return;
     const localPlayer = findLocalPlayer(snapshot);
     const { isKabel } = e.detail;
 
