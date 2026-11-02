@@ -806,11 +806,16 @@ function renderActionChips(localPlayer, snapshot) {
   }
 
   setActionChips('btn-action-raid', [`${opportunities.getRaidCost(0)} Inf`, percent(opportunities.describeRaidChance(0).base)]);
+  // Stock and Scandal cost live in the description line, not in extra chips
+  // - two wrapped chip rows don't fit in the fixed-height card.
+  const marketDesc = $('#btn-action-market .action-desc');
   if (snapshot && snapshot.advancedMode) {
     const left = (snapshot.marketStock || []).length;
-    setActionChips('btn-action-market', [formatMoney(GAME_BALANCE.blackMarket.price), `+${GAME_BALANCE.blackMarket.scandalGain}% Skandal · ${left} stok`]);
+    setActionChips('btn-action-market', [formatMoney(GAME_BALANCE.blackMarket.price), 'Pasti']);
+    marketDesc.textContent = `${left} stok · +${GAME_BALANCE.blackMarket.scandalGain}% Skandal`;
   } else {
-    setActionChips('btn-action-market', ['Ditutup', 'Advanced sahaja']);
+    setActionChips('btn-action-market', ['Ditutup', '']);
+    marketDesc.textContent = 'Mod Advanced sahaja.';
   }
 }
 
@@ -1548,9 +1553,10 @@ function renderMatchEnd(snapshot) {
 // above whatever's already rendered until the player dismisses it locally
 // (no host round-trip needed for that, since the effects have already been
 // applied server-side).
-function showNewsOverlay(pending) {
+function showNewsOverlay(pending, round) {
   if (!pending || pending.seq === lastSeenEventSeq) return;
   lastSeenEventSeq = pending.seq;
+  pushFeed(pending.feedText || `${pending.headline}: ${pending.description}`, pending.feedType || 'news', round);
   $('#news-icon').textContent = pending.icon;
   $('#news-headline').textContent = pending.headline;
   $('#news-description').textContent = pending.description;
@@ -1624,6 +1630,8 @@ const FEED_TYPE_LABELS = {
   market: 'PASAR GELAP',
   media_empire: 'EMPAYAR MEDIA',
   skip: 'GILIRAN DILANGKAU',
+  news: 'BERITA',
+  parliament: 'PARLIMEN',
   scandal: 'SKANDAL',
 };
 const matchFeed = [];
@@ -1673,7 +1681,7 @@ function renderRoundHeader(round, maxRounds) {
 function renderMatchScreen(snapshot) {
   if (!snapshot.started) return;
 
-  showNewsOverlay(snapshot.pendingNews);
+  showNewsOverlay(snapshot.pendingNews, snapshot.round);
   showParliamentOverlay(snapshot.pendingVote);
 
   if (snapshot.matchOver) {
@@ -1879,13 +1887,6 @@ function wireMatchActions() {
     voteCountdownInterval = null;
   });
 
-  $('#btn-vote-abstain').addEventListener('click', () => {
-    sound.playClick();
-    match.castVote('abstain');
-    $('#parliament-overlay').hidden = true;
-    clearInterval(voteCountdownInterval);
-    voteCountdownInterval = null;
-  });
 }
 
 function wireMatchEvents() {

@@ -60,17 +60,19 @@ let kabelClaimed = false;
 let pendingNews = null;
 let newsSeq = 0;
 
-function postNews({ icon, headline, description }) {
+// `feedText`/`feedType` are the one-line version for the Berita Terkini log
+// (the overlay itself shows the full headline/description).
+function postNews({ icon, headline, description, feedText = null, feedType = 'news' }) {
   newsSeq += 1;
-  pendingNews = { icon, headline, description, seq: newsSeq };
+  pendingNews = { icon, headline, description, feedText, feedType, seq: newsSeq };
 }
 
 // Parliament Voting: while `pendingVote` is set, every turn-gated action is
 // blocked (see isActivePlayerId below) - the whole table pauses for this,
 // unlike every other mechanic in the game which only ever gates one actor.
-// `votes` is playerId -> 'yes'|'no'|'abstain'; anyone not in it by
+// `votes` is playerId -> 'yes'|'no'; anyone not in it by
 // resolution time (including a disconnected player) is an abstention and
-// is left out of the count entirely. `voteTimer` is the host-side
+// is left out of the count entirely (voters only ever choose Yes or No). `voteTimer` is the host-side
 // force-resolve clock; a vote also resolves early the moment every
 // connected *human* has cast one (bots never vote, so they can't hold it up).
 let pendingVote = null;
@@ -252,14 +254,15 @@ function hostCastVote(playerId, choice) {
   const players = room.getPlayersLive();
   const player = players.find((p) => p.id === playerId);
   if (!player || !player.connected || player.isBot) return;
+  if (choice !== 'yes' && choice !== 'no') return;
 
-  pendingVote.votes[playerId] = choice === 'yes' || choice === 'no' ? choice : 'abstain';
+  pendingVote.votes[playerId] = choice;
 
   const stillWaiting = players.some((p) => p.connected && !p.isBot && !pendingVote.votes[p.id]);
   if (!stillWaiting) resolveVote();
 }
 
-// Tallies Yes vs No - everyone else (an explicit abstain, never voted, bots,
+// Tallies Yes vs No - everyone else (never voted, bots,
 // or disconnected before casting) is an abstention and doesn't count either
 // way. The motion passes only on a strict Yes majority, so a tie or a fully
 // silent table never passes it. Applies the motion only if it passed, posts
@@ -289,6 +292,8 @@ function resolveVote() {
     icon: '🏛️',
     headline: passed ? 'MOTION PASSED' : 'MOTION FAILED',
     description: `${vote.name} — ${passed ? 'Passed' : 'Failed'} (${yesCount} Yes, ${noCount} No, ${abstainCount} Abstain). ${vote.description}${outcomeNote}`,
+    feedText: `🏛️ ${vote.name} — ${passed ? 'PASSED' : 'FAILED'} (${yesCount} Yes, ${noCount} No, ${abstainCount} Abstain).${outcomeNote}`,
+    feedType: 'parliament',
   });
   // Clears pendingVote above already ran; now settle whatever the turn
   // state underneath actually is. If the player now up disconnected while
