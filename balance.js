@@ -136,6 +136,17 @@ export const GAME_BALANCE = {
     leakMaxChance: 90,
     skipTurnsOnLeak: 1,
     skipNoticeMs: 2500, // how long the "turn skipped" notice stays up before play moves on
+
+    // Conditional deals ("kontrak"): the payment is split. `heldPercent` of it
+    // stays in escrow until the condition is met - released to the target when
+    // it is, handed back to the offerer when it isn't. A target who breaks
+    // the terms can then be exposed ("Dedahkan", free): refund of what they
+    // already received, a public Scandal hit, and a Pecah Amanah mark.
+    heldPercent: 50,
+    contractRounds: 2, // window for "don't harm me" / "don't Politik" / "Sabotaj X"
+    exposeTargetScandal: 30,
+    exposeOffererScandal: 10,
+    botBreakChance: 25, // chance a bot that accepts a contract means to betray it
   },
 
   // Approval Rating is a second public-standing meter alongside Scandal

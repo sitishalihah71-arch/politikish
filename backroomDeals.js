@@ -4,28 +4,132 @@
 // pending deal: match.js keeps this module's registry host-side only and
 // messages each party directly (see room.getConnectionsByPlayerId), the
 // same privacy boundary already proven for KABEL/Political Network.
+//
+// A deal may carry a CONDITION ("kontrak"): the offerer asks the target for
+// something the host can check. Then the payment is split - the "held"
+// share is taken from the offerer straight away and kept in escrow; it goes
+// to the target if the condition is met, and back to the offerer if it is
+// not (or can't be). A target who breaks the terms can be exposed by the
+// offerer afterwards (see exposeContract).
+//
+//   vote       target votes YA/TIDAK in the next Parliament vote
+//   noharm     target doesn't Sabotaj / Raid / smear the offerer for a window
+//   sabotage   target Sabotajs a named rival on their next turn
+//   nopolitik  target doesn't Politik into the seat above the offerer
 
 import { GAME_BALANCE } from './balance.js';
+import { RANK_LABELS, getNextRank } from './player.js';
+import { validateSabotaj } from './sabotage.js';
+import { applyScandalDelta } from './effects.js';
+
+const cfg = GAME_BALANCE.backroomDeals;
+
+export const CONDITION_TYPES = ['none', 'vote', 'noharm', 'sabotage', 'nopolitik'];
 
 let dealSeq = 0;
-const pendingDeals = new Map(); // dealId -> { offererId, targetId, money, influence }
+let contractSeq = 0;
+const pendingDeals = new Map(); // dealId -> { offererId, targetId, money, influence, condition }
+let contracts = []; // host-side registry of conditional deals (all statuses)
 
 function affordable(player, money, influence) {
   return player.money >= money && player.influence >= influence;
 }
 
-// reason codes: 'invalid-target' | 'invalid-amount' | 'insufficient-funds'
-export function proposeDeal(offerer, target, money, influence) {
+// The round at the end of which the next Parliament session opens, or null
+// if none will open before the match ends (sessions never open after the
+// final round, see match.js's advanceTurn).
+export function getNextVoteRound(round, maxRounds, parliamentEnabled) {
+  if (!parliamentEnabled) return null;
+  const interval = GAME_BALANCE.parliament.intervalRounds;
+  const voteRound = Math.ceil(round / interval) * interval;
+  return voteRound < maxRounds ? voteRound : null;
+}
+
+// Human-readable terms, shared by the offer preview, the incoming deal and
+// the contracts list. `nameOf(id)` resolves a player id to a name.
+export function describeCondition(condition, nameOf = () => 'seorang pemain') {
+  switch (condition?.type) {
+    case 'vote':
+      return `Undi ${condition.choice === 'yes' ? 'YA' : 'TIDAK'} pada undian parlimen seterusnya (akhir ronda ${condition.voteRound})`;
+    case 'noharm':
+      return `Jangan Sabotaj, Raid atau serang imej saya hingga akhir ronda ${condition.untilRound}`;
+    case 'sabotage':
+      return `Sabotaj ${nameOf(condition.victimId)} pada giliran seterusnya`;
+    case 'nopolitik':
+      return `Jangan guna Politik ke kerusi ${RANK_LABELS[condition.rank] || ''} hingga akhir ronda ${condition.untilRound}`;
+    default:
+      return 'Tiada syarat';
+  }
+}
+
+// Splits a payment: `heldPercent` of each currency is escrowed, the rest is
+// paid up front.
+export function splitPayment(money, influence) {
+  const held = {
+    money: Math.floor((money * cfg.heldPercent) / 100),
+    influence: Math.floor((influence * cfg.heldPercent) / 100),
+  };
+  return {
+    held,
+    upfront: { money: money - held.money, influence: influence - held.influence },
+  };
+}
+
+// Returns { ok:true, condition } with the derived fields filled in (rounds,
+// seat rank), or { ok:false, reason }. reason: 'condition-unavailable' |
+// 'invalid-victim' | 'condition-pointless'
+function buildCondition(raw, offerer, target, players, ctx) {
+  const type = CONDITION_TYPES.includes(raw?.type) ? raw.type : 'none';
+  if (type === 'none') return { ok: true, condition: { type: 'none' } };
+
+  if (type === 'vote') {
+    const voteRound = getNextVoteRound(ctx.round, ctx.maxRounds, ctx.parliamentEnabled);
+    if (!voteRound || (raw.choice !== 'yes' && raw.choice !== 'no')) {
+      return { ok: false, reason: 'condition-unavailable' };
+    }
+    return { ok: true, condition: { type, choice: raw.choice, voteRound } };
+  }
+
+  if (type === 'noharm') {
+    return { ok: true, condition: { type, untilRound: ctx.round + cfg.contractRounds - 1 } };
+  }
+
+  if (type === 'sabotage') {
+    const victim = players.find((p) => p.id === raw.victimId);
+    if (!victim || victim.id === offerer.id || victim.id === target.id) {
+      return { ok: false, reason: 'invalid-victim' };
+    }
+    // Only structural problems rule a victim out here - being a little
+    // short of Influence right now is the target's own problem to solve.
+    const check = validateSabotaj(target, victim, players, 0);
+    if (!check.ok && check.reason !== 'insufficient-influence') {
+      return { ok: false, reason: 'invalid-victim' };
+    }
+    return { ok: true, condition: { type, victimId: victim.id } };
+  }
+
+  // nopolitik: only meaningful when both of them are after the same seat.
+  const rank = getNextRank(offerer.rank);
+  if (!rank || getNextRank(target.rank) !== rank) return { ok: false, reason: 'condition-pointless' };
+  return { ok: true, condition: { type, rank, untilRound: ctx.round + cfg.contractRounds - 1 } };
+}
+
+// reason codes: 'invalid-target' | 'invalid-amount' | 'insufficient-funds' |
+// 'condition-unavailable' | 'invalid-victim' | 'condition-pointless'
+export function proposeDeal(offerer, target, money, influence, rawCondition = null, players = [], ctx = {}) {
   const m = Math.max(0, Math.floor(money) || 0);
   const inf = Math.max(0, Math.floor(influence) || 0);
   if (!target || target.id === offerer.id) return { ok: false, reason: 'invalid-target' };
   if (m === 0 && inf === 0) return { ok: false, reason: 'invalid-amount' };
   if (!affordable(offerer, m, inf)) return { ok: false, reason: 'insufficient-funds' };
 
+  const built = buildCondition(rawCondition, offerer, target, players, ctx);
+  if (!built.ok) return built;
+
   dealSeq += 1;
   const dealId = `deal-${dealSeq}`;
-  pendingDeals.set(dealId, { offererId: offerer.id, targetId: target.id, money: m, influence: inf });
-  return { ok: true, dealId, money: m, influence: inf };
+  pendingDeals.set(dealId, { offererId: offerer.id, targetId: target.id, money: m, influence: inf, condition: built.condition });
+  return { ok: true, dealId, money: m, influence: inf, condition: built.condition };
 }
 
 // Leak chance scales with whichever party is more scandalous - a clean
@@ -42,9 +146,12 @@ function getLeakChance(offererScandal, targetScandal) {
 // even the other party is told why) or an Accept, which then either
 // succeeded quietly (`leaked:false`) or leaked (`leaked:true`, resources
 // never move, both parties get benched for their next turn instead).
-export function respondToDeal(dealId, accept, players, rng = Math.random) {
+// A successful conditional deal also returns the new `contract`.
+export function respondToDeal(dealId, accept, players, ctx = {}, rng = Math.random, responderId = null) {
   const deal = pendingDeals.get(dealId);
   if (!deal) return { ok: false, reason: 'deal-not-found' };
+  // Only the person the deal was addressed to may answer it.
+  if (responderId && responderId !== deal.targetId) return { ok: false, reason: 'deal-not-found' };
   const offerer = players.find((p) => p.id === deal.offererId);
   const target = players.find((p) => p.id === deal.targetId);
   pendingDeals.delete(dealId);
@@ -62,29 +169,204 @@ export function respondToDeal(dealId, accept, players, rng = Math.random) {
   }
 
   const leaked = rng() < getLeakChance(offerer.scandal, target.scandal);
+  const base = {
+    ok: true, accepted: true,
+    offererId: deal.offererId, targetId: deal.targetId,
+    money: deal.money, influence: deal.influence,
+    condition: deal.condition,
+  };
 
   if (leaked) {
     offerer.skipNextTurn = true;
     target.skipNextTurn = true;
-    return {
-      ok: true, accepted: true, leaked: true,
-      offererId: deal.offererId, targetId: deal.targetId,
-      money: deal.money, influence: deal.influence,
-    };
+    return { ...base, leaked: true };
   }
 
+  const conditional = deal.condition.type !== 'none';
+  const { held, upfront } = conditional
+    ? splitPayment(deal.money, deal.influence)
+    : { held: { money: 0, influence: 0 }, upfront: { money: deal.money, influence: deal.influence } };
+
+  // The whole payment leaves the offerer now; the held share sits in the
+  // contract rather than with either party.
   offerer.money -= deal.money;
   offerer.influence -= deal.influence;
-  target.money += deal.money;
-  target.influence += deal.influence;
+  target.money += upfront.money;
+  target.influence += upfront.influence;
 
-  return {
-    ok: true, accepted: true, leaked: false,
-    offererId: deal.offererId, targetId: deal.targetId,
-    money: deal.money, influence: deal.influence,
+  if (!conditional) return { ...base, leaked: false };
+
+  contractSeq += 1;
+  const contract = {
+    id: `contract-${contractSeq}`,
+    offererId: offerer.id,
+    targetId: target.id,
+    money: deal.money,
+    influence: deal.influence,
+    upfront,
+    held,
+    condition: deal.condition,
+    status: 'active',
+    createdRound: ctx.round || 1,
+    afterVoteSeq: ctx.voteSeq || 0,
+    feasible: true, // sabotage: refreshed at the start of the target's turn
+    botWillBreak: Boolean(target.isBot) && rng() * 100 < cfg.botBreakChance,
   };
+  contracts.push(contract);
+  return { ...base, leaked: false, contract: viewOf(contract), contractId: contract.id, upfront, held };
+}
+
+// ---------- Contract lifecycle ----------
+
+function viewOf(c) {
+  return {
+    id: c.id,
+    offererId: c.offererId,
+    targetId: c.targetId,
+    money: c.money,
+    influence: c.influence,
+    upfront: c.upfront,
+    held: c.held,
+    condition: c.condition,
+    status: c.status,
+    createdRound: c.createdRound,
+  };
+}
+
+// What one player is allowed to see: only contracts they are a party to.
+export function getContractViewsFor(playerId) {
+  return contracts
+    .filter((c) => c.offererId === playerId || c.targetId === playerId)
+    .map((c) => ({ ...viewOf(c), role: c.offererId === playerId ? 'offerer' : 'target' }));
+}
+
+// Raw active contracts where `playerId` is the target - used by match.js to
+// steer bots, never sent anywhere.
+export function getActiveContractsAsTarget(playerId) {
+  return contracts.filter((c) => c.targetId === playerId && c.status === 'active');
+}
+
+export function getBreachedContractsAsOfferer(playerId) {
+  return contracts.filter((c) => c.offererId === playerId && c.status === 'breached');
+}
+
+// fulfilled: escrow goes to the target. breached/expired: escrow goes back
+// to the offerer. Returns the event for the caller to announce.
+function settle(contract, kind, players) {
+  const offerer = players.find((p) => p.id === contract.offererId);
+  const target = players.find((p) => p.id === contract.targetId);
+  const recipient = kind === 'fulfilled' ? target : offerer;
+  if (recipient) {
+    recipient.money += contract.held.money;
+    recipient.influence += contract.held.influence;
+  }
+  contract.status = kind;
+  return { kind, contract: viewOf(contract), offererId: contract.offererId, targetId: contract.targetId };
+}
+
+function activeContracts() {
+  return contracts.filter((c) => c.status === 'active');
+}
+
+// Called for every resolved turn action (match.js's setLastAction). Only the
+// target's own actions can fulfil or break a contract.
+export function handleAction(action, players) {
+  const events = [];
+  if (!action || action.type === 'skip') return events;
+  activeContracts().forEach((c) => {
+    if (c.targetId !== action.actorId) return;
+    const { condition } = c;
+
+    if (condition.type === 'noharm') {
+      const hostile = ['sabotaj', 'raid', 'media'].includes(action.type) && action.targetId === c.offererId;
+      if (hostile) events.push(settle(c, 'breached', players));
+    } else if (condition.type === 'nopolitik') {
+      if (action.type === 'politik' && action.toRank === condition.rank) events.push(settle(c, 'breached', players));
+    } else if (condition.type === 'sabotage') {
+      if (action.type === 'sabotaj' && action.targetId === condition.victimId) {
+        events.push(settle(c, 'fulfilled', players));
+      } else {
+        // If Sabotaj on that rival was no longer possible this turn, it
+        // can't be held against them - the deal just lapses.
+        events.push(settle(c, c.feasible ? 'breached' : 'expired', players));
+      }
+    }
+  });
+  return events;
+}
+
+// A Parliament vote just closed: settle every vote contract that was struck
+// before it opened.
+export function handleVoteResolved(vote, players) {
+  const events = [];
+  activeContracts().forEach((c) => {
+    if (c.condition.type !== 'vote' || vote.seq <= c.afterVoteSeq) return;
+    const cast = vote.votes[c.targetId];
+    events.push(settle(c, cast === c.condition.choice ? 'fulfilled' : 'breached', players));
+  });
+  return events;
+}
+
+// A round just completed: windows that have run out without a breach are
+// fulfilled, anything still waiting past its deadline lapses.
+export function handleRoundEnd(completedRound, players) {
+  const events = [];
+  if (completedRound === null) return events;
+  activeContracts().forEach((c) => {
+    const { condition } = c;
+    if ((condition.type === 'noharm' || condition.type === 'nopolitik') && completedRound >= condition.untilRound) {
+      events.push(settle(c, 'fulfilled', players));
+    } else if (condition.type === 'sabotage' && completedRound >= c.createdRound + cfg.contractRounds) {
+      events.push(settle(c, 'expired', players));
+    } else if (condition.type === 'vote' && completedRound > condition.voteRound) {
+      events.push(settle(c, 'expired', players));
+    }
+  });
+  return events;
+}
+
+// A turn just started: note whether the target of a "Sabotaj X" contract
+// can actually do it right now, so a turn that makes it impossible isn't
+// counted as a breach.
+export function noteTurnStart(activePlayer, players) {
+  activeContracts().forEach((c) => {
+    if (c.condition.type !== 'sabotage' || c.targetId !== activePlayer.id) return;
+    const victim = players.find((p) => p.id === c.condition.victimId);
+    c.feasible = Boolean(victim) && validateSabotaj(activePlayer, victim, players, 0, { isKabel: Boolean(activePlayer.hasKabel) }).ok;
+  });
+}
+
+// "Dedahkan": only the offerer, only for a breached contract, free. The
+// target hands back what they were paid up front (as much of it as they
+// still have), takes a public Scandal hit and gets a Pecah Amanah mark; the
+// offerer takes a smaller Scandal hit for having been in on it.
+// reason codes: 'contract-not-found' | 'not-exposable'
+export function exposeContract(contractId, requesterId, players) {
+  const c = contracts.find((x) => x.id === contractId);
+  if (!c || c.offererId !== requesterId) return { ok: false, reason: 'contract-not-found' };
+  if (c.status !== 'breached') return { ok: false, reason: 'not-exposable' };
+  const offerer = players.find((p) => p.id === c.offererId);
+  const target = players.find((p) => p.id === c.targetId);
+  if (!offerer || !target) return { ok: false, reason: 'contract-not-found' };
+
+  const refund = {
+    money: Math.min(c.upfront.money, Math.max(target.money, 0)),
+    influence: Math.min(c.upfront.influence, Math.max(target.influence, 0)),
+  };
+  target.money -= refund.money;
+  target.influence -= refund.influence;
+  offerer.money += refund.money;
+  offerer.influence += refund.influence;
+
+  applyScandalDelta(target, cfg.exposeTargetScandal);
+  applyScandalDelta(offerer, cfg.exposeOffererScandal);
+  target.betrayals = (target.betrayals || 0) + 1;
+  c.status = 'exposed';
+
+  return { ok: true, contract: viewOf(c), refund, offerer, target };
 }
 
 export function resetDeals() {
   pendingDeals.clear();
+  contracts = [];
 }

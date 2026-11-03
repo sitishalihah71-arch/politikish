@@ -13,7 +13,7 @@
 // room.js is immediately visible here too. Clients just store whatever the
 // host broadcasts.
 
-import { bus } from './utils.js';
+import { bus, formatMoney } from './utils.js';
 import * as room from './room.js';
 import * as multiplayer from './multiplayer.js';
 import { RANKS, initMatchState } from './player.js';
@@ -21,10 +21,15 @@ import { applyScandalPenalty, tickPublicSupport } from './effects.js';
 import { generateProjectOffers, resolveProjek } from './projects.js';
 import { generateMediaOffers, resolveMedia } from './media.js';
 import { resolvePolitik } from './politics.js';
-import { resolveSabotaj } from './sabotage.js';
+import { resolveSabotaj, validateSabotaj } from './sabotage.js';
 import { pickNationalEvent, applyNationalEvent } from './events.js';
 import { dealStartingAssets, generateMarketStock, hasAsset, resolveRaid, generateMarketOffers, buyAsset } from './politicalOpportunities.js';
-import { proposeDeal, respondToDeal, resetDeals } from './backroomDeals.js';
+import {
+  proposeDeal, respondToDeal, resetDeals, getContractViewsFor, getActiveContractsAsTarget,
+  getBreachedContractsAsOfferer, handleAction as contractsOnAction, handleVoteResolved as contractsOnVote,
+  handleRoundEnd as contractsOnRoundEnd, noteTurnStart as contractsNoteTurnStart, exposeContract,
+  getNextVoteRound,
+} from './backroomDeals.js';
 import { PARLIAMENT_MOTIONS, pickMotion, applyMotion } from './parliament.js';
 import { assignSecretObjective, checkSecretObjective } from './objectives.js';
 import { decideBotAction, decideDealProposal, decideDealResponse } from './bots.js';
@@ -97,6 +102,11 @@ let marketStock = [];
 let passivePayout = null;
 let passiveSeq = 0;
 
+// Backroom contracts are private: the host keeps the registry (backroomDeals.js),
+// each client only ever receives its own, riding on its personalised
+// match-update payload.
+let clientContracts = [];
+
 function isHostRole() {
   return room.getRoomSnapshot().isHost;
 }
@@ -146,6 +156,7 @@ export function getMatchSnapshot() {
     advancedMode,
     marketStock: [...marketStock],
     passivePayout,
+    contracts: isHostRole() ? getContractViewsFor(roomSnap.localPlayerId) : clientContracts,
   };
 }
 
@@ -165,6 +176,7 @@ function buildBroadcastPayloadFor(viewerId) {
     advancedMode,
     marketStock: [...marketStock],
     passivePayout,
+    contracts: getContractViewsFor(viewerId),
   };
 }
 
@@ -239,6 +251,17 @@ function maybeTriggerParliamentSession(completedRound, players) {
     deadline: Date.now() + GAME_BALANCE.parliament.voteDurationMs,
     votes: {},
   };
+  // A bot that took a bribe to vote does so right away (or, if it means to
+  // betray the deal, votes the other way). Other bots still abstain.
+  players.forEach((p) => {
+    if (!p.isBot) return;
+    getActiveContractsAsTarget(p.id)
+      .filter((c) => c.condition.type === 'vote' && pendingVote.seq > c.afterVoteSeq)
+      .forEach((c) => {
+        const { choice } = c.condition;
+        pendingVote.votes[p.id] = c.botWillBreak ? (choice === 'yes' ? 'no' : 'yes') : choice;
+      });
+  });
   clearTimeout(voteTimer);
   voteTimer = setTimeout(resolveVote, GAME_BALANCE.parliament.voteDurationMs);
 }
@@ -284,6 +307,7 @@ function resolveVote() {
   const motion = PARLIAMENT_MOTIONS.find((m) => m.id === vote.motionId);
   const target = vote.targetId ? players.find((p) => p.id === vote.targetId) : null;
   if (passed) applyMotion(motion, target, players);
+  processContractEvents(contractsOnVote(vote, players));
 
   pendingVote = null;
 
@@ -383,6 +407,7 @@ function advanceTurn({ skipSupportTick = false } = {}) {
 
   applyMediaEmpirePassive(completedRound, players);
   maybeTriggerNationalEvent(completedRound, players);
+  processContractEvents(contractsOnRoundEnd(completedRound, players));
 
   if (round > maxRounds) {
     endMatch(players);
@@ -412,6 +437,7 @@ function settleTurnState() {
   }
 
   const newActive = getActivePlayer(room.getPlayersLive());
+  if (newActive) contractsNoteTurnStart(newActive, room.getPlayersLive());
   if (newActive && newActive.skipNextTurn) {
     newActive.skipNextTurn = false;
     turnSkipping = true;
@@ -456,15 +482,21 @@ function resolveBotTurn(botId) {
   const bot = players.find((p) => p.id === botId);
   if (!bot || !isActivePlayerId(botId)) return;
 
-  const proposal = decideDealProposal(bot, players);
-  if (proposal) hostProposeDeal(bot.id, proposal.targetId, proposal.money, proposal.influence, () => {});
+  // A bot whose deal was broken exposes the culprit most of the time.
+  getBreachedContractsAsOfferer(bot.id).forEach((c) => {
+    if (Math.random() < 0.8) hostExposeContract(bot.id, c.id);
+  });
+
+  const voteAhead = Boolean(getNextVoteRound(currentRound, maxRounds, room.getRoomSnapshot().settings.parliamentVoting));
+  const proposal = decideDealProposal(bot, players, { voteAhead });
+  if (proposal) hostProposeDeal(bot.id, proposal.targetId, proposal.money, proposal.influence, proposal.condition, () => {});
 
   const offers = {
     projekOffers: generateProjectOffers(),
     mediaOffers: generateMediaOffers(),
     marketOffers: advancedMode ? generateMarketOffers(bot, marketStock) : [],
   };
-  const action = decideBotAction(bot, players, offers);
+  const action = decideBotAction(bot, players, offers, buildBotContractPlan(bot, players));
   const noop = () => {};
 
   if (action.type === 'projek') hostResolveProjek(botId, action.cardId);
@@ -492,6 +524,8 @@ function isActivePlayerId(playerId) {
 function setLastAction(action) {
   actionSeq += 1;
   lastAction = { ...action, seq: actionSeq };
+  // Every resolved turn action may fulfil or break a Backroom contract.
+  if (isHostRole()) processContractEvents(contractsOnAction(lastAction, room.getPlayersLive()));
 }
 
 // Once a player has `threshold` successful Projects in one category, every
@@ -679,21 +713,25 @@ function notifyPlayer(playerId, type, payload) {
 // Backroom Deals are not turn actions - any connected player can propose or
 // respond at any time (see backroomDeals.js), so neither of these checks
 // isActivePlayerId the way every other resolver does.
-function hostProposeDeal(offererId, targetId, money, influence, respond) {
+function hostProposeDeal(offererId, targetId, money, influence, condition, respond) {
   const players = room.getPlayersLive();
   const offerer = players.find((p) => p.id === offererId);
   const target = players.find((p) => p.id === targetId);
   if (!offerer) return;
-  const result = proposeDeal(offerer, target, money, influence);
+  const result = proposeDeal(offerer, target, money, influence, condition, players, dealContext());
   if (!result.ok) {
     respond({ type: 'action-rejected', payload: { reason: result.reason } });
     return;
   }
   // A bot target has no connection/local screen for notifyPlayer to reach -
   // it never "receives" the offer through the normal channel, so its
-  // accept/reject decision is driven directly instead.
+  // accept/reject decision is driven directly instead. It turns down a
+  // "Sabotaj X" it couldn't carry out.
   if (target.isBot) {
-    const accept = decideDealResponse(target, { money: result.money, influence: result.influence });
+    const victim = players.find((p) => p.id === result.condition.victimId);
+    const canComply = result.condition.type !== 'sabotage'
+      || (victim && validateSabotaj(target, victim, players, 0, { isKabel: Boolean(target.hasKabel) }).ok);
+    const accept = decideDealResponse(target, { money: result.money, influence: result.influence, canComply });
     hostRespondToDeal(target.id, result.dealId, accept);
     return;
   }
@@ -704,12 +742,23 @@ function hostProposeDeal(offererId, targetId, money, influence, respond) {
     fromName: offerer.name,
     money: result.money,
     influence: result.influence,
+    condition: result.condition,
   });
+}
+
+// What backroomDeals.js needs to know about the match around a deal.
+function dealContext() {
+  return {
+    round: currentRound,
+    maxRounds,
+    voteSeq,
+    parliamentEnabled: Boolean(room.getRoomSnapshot().settings.parliamentVoting),
+  };
 }
 
 function hostRespondToDeal(responderId, dealId, accept) {
   const players = room.getPlayersLive();
-  const result = respondToDeal(dealId, accept, players);
+  const result = respondToDeal(dealId, accept, players, dealContext(), Math.random, responderId);
   if (!result.ok) return; // already resolved/expired - nothing to do
 
   if (!result.accepted) {
@@ -737,9 +786,80 @@ function hostRespondToDeal(responderId, dealId, accept) {
   // Deliberately no setLastAction here - deals never generate the usual
   // "X did Y" toast, leaked or not. The only public trace of a leaked deal
   // is the news item above; a clean deal leaves none at all.
-  notifyPlayer(result.offererId, 'deal-result', { accepted: true, leaked: result.leaked, role: 'offerer', money: result.money, influence: result.influence });
-  notifyPlayer(result.targetId, 'deal-result', { accepted: true, leaked: result.leaked, role: 'target', money: result.money, influence: result.influence });
+  const detail = {
+    accepted: true,
+    leaked: result.leaked,
+    money: result.money,
+    influence: result.influence,
+    condition: result.condition,
+    upfront: result.upfront || null,
+    held: result.held || null,
+  };
+  notifyPlayer(result.offererId, 'deal-result', { ...detail, role: 'offerer', otherId: result.targetId });
+  notifyPlayer(result.targetId, 'deal-result', { ...detail, role: 'target', otherId: result.offererId });
   broadcastMatchUpdate();
+}
+
+// Tells each party (privately) what just happened to their contract and
+// re-checks Secret Objectives, since escrow just moved Money/Influence.
+// Safe to call with no events.
+function processContractEvents(events) {
+  if (!events.length) return;
+  const players = room.getPlayersLive();
+  events.forEach((event) => {
+    const detail = { kind: event.kind, contract: event.contract };
+    notifyPlayer(event.offererId, 'deal-contract-event', { ...detail, role: 'offerer', otherId: event.targetId });
+    notifyPlayer(event.targetId, 'deal-contract-event', { ...detail, role: 'target', otherId: event.offererId });
+    [event.offererId, event.targetId].forEach((id) => {
+      const p = players.find((pl) => pl.id === id);
+      if (p) maybeCompleteObjective(p);
+    });
+  });
+}
+
+// "Dedahkan" - the one moment a contract goes public.
+function hostExposeContract(requesterId, contractId) {
+  const players = room.getPlayersLive();
+  const result = exposeContract(contractId, requesterId, players);
+  if (!result.ok) return;
+  const { offerer, target, refund } = result;
+  const refundParts = [];
+  if (refund.money) refundParts.push(formatMoney(refund.money));
+  if (refund.influence) refundParts.push(`${refund.influence} Influence`);
+  const refundText = refundParts.length ? ` ${target.name} dipaksa memulangkan ${refundParts.join(' + ')}.` : '';
+  postNews({
+    icon: '🗂️',
+    headline: 'DOKUMEN RASUAH BOCOR',
+    description: `${offerer.name} mendedahkan bahawa ${target.name} memungkiri perjanjian sulit mereka. ${target.name} +${GAME_BALANCE.backroomDeals.exposeTargetScandal}% Skandal dan digelar Pecah Amanah; ${offerer.name} +${GAME_BALANCE.backroomDeals.exposeOffererScandal}% Skandal kerana terlibat sama.${refundText}`,
+    feedText: `🗂️ ${offerer.name} mendedahkan ${target.name} — Pecah Amanah! (+${GAME_BALANCE.backroomDeals.exposeTargetScandal}% Skandal)`,
+    feedType: 'news',
+  });
+  maybeCompleteObjective(offerer);
+  maybeCompleteObjective(target);
+  notifyPlayer(offerer.id, 'deal-contract-event', { kind: 'exposed', contract: result.contract, role: 'offerer', otherId: target.id });
+  notifyPlayer(target.id, 'deal-contract-event', { kind: 'exposed', contract: result.contract, role: 'target', otherId: offerer.id });
+  broadcastMatchUpdate();
+}
+
+// What a bot has to do (or may try to dodge) to stay on the right side of
+// the contracts it accepted. A bot that decided to betray one does the
+// forbidden thing whenever it is possible. Everything here is validated
+// against the same rules the resolvers use, because a rejected bot action
+// would leave the turn stuck.
+function buildBotContractPlan(bot, players) {
+  const plan = { avoidTargetIds: new Set(), avoidPolitikRank: null, forceSabotajVictimId: null, betrayTargetId: null, betrayPolitikRank: null };
+  getActiveContractsAsTarget(bot.id).forEach((c) => {
+    const { condition } = c;
+    if (condition.type === 'noharm') {
+      if (c.botWillBreak) plan.betrayTargetId = c.offererId; else plan.avoidTargetIds.add(c.offererId);
+    } else if (condition.type === 'nopolitik') {
+      if (c.botWillBreak) plan.betrayPolitikRank = condition.rank; else plan.avoidPolitikRank = condition.rank;
+    } else if (condition.type === 'sabotage') {
+      if (c.botWillBreak) plan.avoidTargetIds.add(condition.victimId);
+      else if (c.feasible) plan.forceSabotajVictimId = condition.victimId;
+    }
+  });
+  return plan;
 }
 
 function handleHostMatchMessage(type, payload, conn) {
@@ -778,9 +898,11 @@ function handleHostMatchMessage(type, payload, conn) {
     hostResolveMarketPurchase(conn.peer, payload?.assetType, respond);
   } else if (type === 'deal-propose') {
     // Not turn-gated - any connected player can propose a bribe at any time.
-    hostProposeDeal(conn.peer, payload?.targetId, payload?.money || 0, payload?.influence || 0, respond);
+    hostProposeDeal(conn.peer, payload?.targetId, payload?.money || 0, payload?.influence || 0, payload?.condition, respond);
   } else if (type === 'deal-respond') {
     hostRespondToDeal(conn.peer, payload?.dealId, Boolean(payload?.accept));
+  } else if (type === 'deal-expose') {
+    hostExposeContract(conn.peer, payload?.contractId);
   } else if (type === 'vote-cast') {
     // Not turn-gated - any connected player votes while pendingVote is open.
     hostCastVote(conn.peer, payload?.choice);
@@ -811,6 +933,7 @@ function handleClientMatchMessage(type, payload) {
     advancedMode = Boolean(payload.advancedMode);
     marketStock = payload.marketStock || [];
     passivePayout = payload.passivePayout || null;
+    clientContracts = payload.contracts || [];
     bus.emit('match:updated', getMatchSnapshot());
   } else if (type === 'projek-offers') {
     bus.emit('match:offers', { action: 'projek', offers: payload.offers });
@@ -824,6 +947,8 @@ function handleClientMatchMessage(type, payload) {
     bus.emit('match:deal-offer', payload);
   } else if (type === 'deal-result') {
     bus.emit('match:deal-result', payload);
+  } else if (type === 'deal-contract-event') {
+    bus.emit('match:deal-contract-event', payload);
   } else if (type === 'objective-complete') {
     bus.emit('match:objective-complete', payload);
   } else if (type === 'action-rejected') {
@@ -929,13 +1054,22 @@ export function chooseMarketAsset(assetType) {
 }
 
 // Backroom Deals are never turn-gated - can be called any time, by anyone.
-export function proposeBackroomDeal(targetId, money, influence) {
+export function proposeBackroomDeal(targetId, money, influence, condition = { type: 'none' }) {
   if (isHostRole()) {
-    hostProposeDeal(room.getRoomSnapshot().localPlayerId, targetId, money, influence, (msg) => {
+    hostProposeDeal(room.getRoomSnapshot().localPlayerId, targetId, money, influence, condition, (msg) => {
       bus.emit('match:action-rejected', { reason: msg.payload.reason });
     });
   } else {
-    multiplayer.send({ type: 'deal-propose', payload: { targetId, money, influence } });
+    multiplayer.send({ type: 'deal-propose', payload: { targetId, money, influence, condition } });
+  }
+}
+
+// "Dedahkan" a contract the other side broke. Free; only the offerer can.
+export function exposeBackroomContract(contractId) {
+  if (isHostRole()) {
+    hostExposeContract(room.getRoomSnapshot().localPlayerId, contractId);
+  } else {
+    multiplayer.send({ type: 'deal-expose', payload: { contractId } });
   }
 }
 
@@ -1038,6 +1172,7 @@ export function resetMatch() {
   matchOver = false;
   winnerId = null;
   clientPlayers = [];
+  clientContracts = [];
   kabelClaimed = false;
   pendingNews = null;
   pendingVote = null;

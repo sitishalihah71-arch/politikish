@@ -1147,6 +1147,7 @@ body[data-screen="match"] .global-corner-icons .icon-btn:hover {
 
 .mtag-you { background: var(--np-red); color: var(--paper-2); }
 .mtag-bot { border: 1px solid var(--ink-3); color: var(--ink-3); }
+.mtag-betray { background: var(--ink); color: var(--paper-2); }
 
 .player-card-stats {
   display: flex;
@@ -5453,5 +5454,156 @@ body[data-screen="lobby"] .global-corner-icons {
 
   .np-modal .story-card .news-headline {
     font-size: 21px;
+  }
+}
+
+/* ---------- Backroom contracts ---------- */
+.match-dock {
+  position: relative;
+}
+
+.contracts-chip {
+  position: absolute;
+  top: -15px;
+  right: 20px;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  height: 28px;
+  padding: 0 4px 0 11px;
+  background: var(--paper-2);
+  border: 2px solid var(--ink);
+  box-shadow: 2px 2px 0 var(--ink);
+  font: 700 14px var(--np-condensed);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink);
+}
+
+.contracts-chip[hidden] {
+  display: none;
+}
+
+.contracts-chip b {
+  min-width: 20px;
+  padding: 1px 5px;
+  background: var(--ink);
+  color: var(--paper-2);
+  font: 700 13px var(--np-condensed);
+  text-align: center;
+}
+
+.contracts-chip.has-alert {
+  background: var(--np-red);
+  color: var(--paper-2);
+  animation: contract-alert 1.4s ease-in-out infinite;
+}
+
+@keyframes contract-alert {
+  50% { box-shadow: 2px 2px 0 var(--ink), 0 0 0 4px rgba(179, 42, 30, 0.35); }
+}
+
+.deal-select {
+  width: 100%;
+  margin-bottom: 8px;
+  color: var(--ink);
+  background: var(--paper-2);
+  border: 1px solid var(--ink-3);
+}
+
+.deal-select[hidden] {
+  display: none;
+}
+
+.np-modal .deal-incoming-terms {
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px dashed var(--ink);
+  background: var(--paper-2);
+  font: italic 400 15px/1.45 var(--np-body);
+  color: var(--ink);
+  text-align: left;
+}
+
+.contracts-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-height: min(60vh, 460px);
+  overflow-y: auto;
+}
+
+.contract-card {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 11px 13px;
+  border: 2px solid var(--ink);
+  background: var(--paper-2);
+}
+
+.contract-card.is-fulfilled,
+.contract-card.is-expired,
+.contract-card.is-exposed {
+  opacity: 0.7;
+  border-style: dashed;
+}
+
+.contract-card.is-breached {
+  border-color: var(--np-red);
+}
+
+.contract-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 10px;
+  font: 800 17px/1.2 var(--np-display);
+}
+
+.contract-status {
+  flex: none;
+  padding: 1px 6px;
+  border: 1px solid var(--ink);
+  font: 700 12px var(--np-condensed);
+  letter-spacing: 0.1em;
+}
+
+.contract-card.is-breached .contract-status {
+  background: var(--np-red);
+  border-color: var(--np-red);
+  color: var(--paper-2);
+}
+
+.contract-pay,
+.contract-terms,
+.contract-note {
+  margin: 0;
+  font: 400 15px/1.4 var(--np-body);
+  color: var(--ink-2);
+}
+
+.contract-terms {
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.contract-note {
+  font-style: italic;
+  color: var(--ink-3);
+}
+
+.contract-expose {
+  align-self: flex-start;
+  margin-top: 4px;
+}
+
+@media (max-width: 860px) {
+  /* Phones: its own small row under the Backroom Deal bar, so it never sits
+     on top of the action cards. */
+  .contracts-chip {
+    position: static;
+    align-self: flex-end;
   }
 }

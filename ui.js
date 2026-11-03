@@ -15,6 +15,7 @@ import { SECRET_OBJECTIVES } from './objectives.js';
 import { GAME_BALANCE } from './balance.js';
 import { getProjekReward } from './projects.js';
 import { buildActionStory } from './stories.js';
+import { describeCondition, getNextVoteRound, splitPayment } from './backroomDeals.js';
 
 let settings = loadSettings();
 let toastTimer = null;
@@ -477,6 +478,9 @@ const ACTION_REJECT_MESSAGES = {
   'duplicate-asset': 'You already own that Political Asset — no duplicates.',
   'out-of-stock': 'That asset is out of stock.',
   'market-closed': 'The Black Market is only open in Advanced Mode.',
+  'condition-unavailable': 'Syarat itu tak tersedia sekarang.',
+  'invalid-victim': 'Sasaran Sabotaj itu tak sah.',
+  'condition-pointless': 'Syarat itu tak bermakna - anda berdua tak berebut kerusi yang sama.',
 };
 
 let hasEnteredMatchScreen = false;
@@ -534,6 +538,11 @@ function renderMatchPlayerList(snapshot) {
       name.appendChild(nameText);
       if (player.id === snapshot.localPlayerId) name.appendChild(makeTag('ANDA', 'mtag-you'));
       if (player.isBot) name.appendChild(makeTag('BOT', 'mtag-bot'));
+      if (player.betrayals) {
+        const tag = makeTag(player.betrayals > 1 ? `KHIANAT ×${player.betrayals}` : 'KHIANAT', 'mtag-betray');
+        tag.title = `Pecah Amanah — didedahkan memungkiri perjanjian sulit (${player.betrayals}×)`;
+        name.appendChild(tag);
+      }
       appendPublicSupportBadge(name, player);
       appendAssetBadges(name, player);
       info.appendChild(name);
@@ -1214,19 +1223,131 @@ function openDealOfferModal(target) {
   moneySlider.max = String(localPlayer.money);
   moneySlider.step = '1000';
   moneySlider.value = '0';
-  moneySlider.oninput = () => { $('#deal-offer-money-value').textContent = formatMoney(Number(moneySlider.value)); };
+  moneySlider.oninput = () => {
+    $('#deal-offer-money-value').textContent = formatMoney(Number(moneySlider.value));
+    updateDealConditionNote(snapshot, localPlayer, target);
+  };
 
   const influenceSlider = $('#deal-offer-influence-slider');
   influenceSlider.min = '0';
   influenceSlider.max = String(localPlayer.influence);
   influenceSlider.step = '50';
   influenceSlider.value = '0';
-  influenceSlider.oninput = () => { $('#deal-offer-influence-value').textContent = `+${influenceSlider.value}`; };
+  influenceSlider.oninput = () => {
+    $('#deal-offer-influence-value').textContent = `+${influenceSlider.value}`;
+    updateDealConditionNote(snapshot, localPlayer, target);
+  };
 
   $('#deal-offer-money-value').textContent = formatMoney(0);
   $('#deal-offer-influence-value').textContent = '+0';
+  setupDealConditionPicker(snapshot, localPlayer, target);
   $('#deal-offer-error').hidden = true;
   $('#deal-offer-modal').hidden = false;
+}
+
+// Rivals the target could be asked to Sabotaj. Only structural problems rule
+// one out - being a bit short of Influence right now is the target's own
+// problem to solve (same leniency as the host's own check).
+function getDealSabotajVictims(snapshot, localPlayer, target) {
+  return snapshot.players.filter((p) => {
+    if (p.id === localPlayer.id || p.id === target.id) return false;
+    const check = sabotage.validateSabotaj(target, p, snapshot.players, 0);
+    return check.ok || check.reason === 'insufficient-influence';
+  });
+}
+
+function setupDealConditionPicker(snapshot, localPlayer, target) {
+  const select = $('#deal-offer-condition');
+  const param = $('#deal-offer-condition-param');
+  const parliamentOn = Boolean(room.getRoomSnapshot().settings.parliamentVoting);
+  const voteRound = getNextVoteRound(snapshot.round, snapshot.maxRounds, parliamentOn);
+  const victims = getDealSabotajVictims(snapshot, localPlayer, target);
+  const seatRank = getNextRank(localPlayer.rank);
+  const sameSeat = Boolean(seatRank) && getNextRank(target.rank) === seatRank;
+  const windowRounds = GAME_BALANCE.backroomDeals.contractRounds;
+
+  const options = [
+    { value: 'none', label: 'Tiada syarat — bayar penuh sekarang' },
+    { value: 'vote', label: voteRound ? `Undi parlimen (akhir ronda ${voteRound})` : 'Undi parlimen — tiada undian akan datang', disabled: !voteRound },
+    { value: 'noharm', label: `Jangan serang saya (${windowRounds} ronda)` },
+    { value: 'sabotage', label: victims.length ? 'Sabotaj seorang pesaing' : 'Sabotaj pesaing — tiada sasaran sah', disabled: !victims.length },
+    { value: 'nopolitik', label: sameSeat ? `Jangan Politik ke kerusi ${RANK_LABELS[seatRank]}` : 'Jangan Politik — anda tak berebut kerusi sama', disabled: !sameSeat },
+  ];
+  select.innerHTML = '';
+  options.forEach((o) => {
+    const opt = document.createElement('option');
+    opt.value = o.value;
+    opt.textContent = o.label;
+    opt.disabled = Boolean(o.disabled);
+    select.appendChild(opt);
+  });
+  select.value = 'none';
+
+  const refresh = () => {
+    param.innerHTML = '';
+    if (select.value === 'vote') {
+      [['yes', 'Undi YA'], ['no', 'Undi TIDAK']].forEach(([value, text]) => {
+        const opt = document.createElement('option');
+        opt.value = value;
+        opt.textContent = text;
+        param.appendChild(opt);
+      });
+      param.hidden = false;
+    } else if (select.value === 'sabotage') {
+      victims.forEach((v) => {
+        const opt = document.createElement('option');
+        opt.value = v.id;
+        opt.textContent = `Sabotaj ${v.name} (${RANK_LABELS[v.rank]})`;
+        param.appendChild(opt);
+      });
+      param.hidden = false;
+    } else {
+      param.hidden = true;
+    }
+    updateDealConditionNote(snapshot, localPlayer, target);
+  };
+  select.onchange = refresh;
+  param.onchange = () => updateDealConditionNote(snapshot, localPlayer, target);
+  refresh();
+}
+
+// The condition as the host will derive it, for previewing its wording.
+function readDealCondition(snapshot, localPlayer) {
+  const type = $('#deal-offer-condition').value;
+  const paramValue = $('#deal-offer-condition-param').value;
+  if (type === 'vote') return { type, choice: paramValue };
+  if (type === 'sabotage') return { type, victimId: paramValue };
+  return { type };
+}
+
+function updateDealConditionNote(snapshot, localPlayer, target) {
+  const note = $('#deal-offer-condition-note');
+  const raw = readDealCondition(snapshot, localPlayer);
+  if (raw.type === 'none') {
+    note.hidden = true;
+    return;
+  }
+  const parliamentOn = Boolean(room.getRoomSnapshot().settings.parliamentVoting);
+  const windowEnd = snapshot.round + GAME_BALANCE.backroomDeals.contractRounds - 1;
+  const preview = {
+    ...raw,
+    voteRound: getNextVoteRound(snapshot.round, snapshot.maxRounds, parliamentOn),
+    untilRound: windowEnd,
+    rank: getNextRank(localPlayer.rank),
+  };
+  const nameOf = (id) => snapshot.players.find((p) => p.id === id)?.name || 'seorang pemain';
+  const money = Number($('#deal-offer-money-slider').value);
+  const influence = Number($('#deal-offer-influence-slider').value);
+  const { upfront, held } = splitPayment(money, influence);
+  note.textContent = `Syarat: ${describeCondition(preview, nameOf)}. ${describePayment(upfront)} dibayar sekarang; ${describePayment(held)} ditahan — ke ${target.name} kalau patuh, balik kepada anda kalau mungkir. Kalau mungkir, anda boleh Dedahkan dia.`;
+  note.hidden = false;
+}
+
+function describePayment(amount) {
+  const parts = [];
+  if (amount.money) parts.push(formatMoney(amount.money));
+  if (amount.influence) parts.push(`${amount.influence} Influence`);
+  return parts.length ? parts.join(' + ') : 'RM0';
 }
 
 // Political Raid is the only action that still opens the extra-Influence
@@ -1781,11 +1902,110 @@ function renderMatchScreen(snapshot) {
   renderHierarchy(snapshot);
   renderActionPanel(snapshot);
   renderBottomBar(snapshot);
+  renderContractsChip(snapshot);
   handleActionFeedback(snapshot);
 
   const isMyTurnNow = snapshot.activePlayerId === snapshot.localPlayerId;
   if (isMyTurnNow && !wasMyTurn) sound.playTurnStart();
   wasMyTurn = isMyTurnNow;
+}
+
+// ---------- Backroom contracts (private: only the two parties ever see them) ----------
+
+const CONTRACT_STATUS_LABELS = {
+  active: 'AKTIF',
+  breached: 'DILANGGAR',
+  fulfilled: 'DIPENUHI',
+  expired: 'TAMAT',
+  exposed: 'DIDEDAHKAN',
+};
+
+// A contract needs attention while it is running, or once it was broken and
+// the offerer can still expose it.
+function isContractLive(contract) {
+  return contract.status === 'active' || (contract.status === 'breached' && contract.role === 'offerer');
+}
+
+function renderContractsChip(snapshot) {
+  const contracts = snapshot.contracts || [];
+  const chip = $('#btn-contracts');
+  chip.hidden = contracts.length === 0;
+  const live = contracts.filter(isContractLive);
+  $('#contracts-count').textContent = String(live.length);
+  chip.classList.toggle('has-alert', contracts.some((c) => c.status === 'breached' && c.role === 'offerer'));
+  if (!$('#contracts-modal').hidden) renderContractsList(snapshot);
+}
+
+function contractStatusNote(c, otherName) {
+  const held = describePayment(c.held);
+  if (c.status === 'active') {
+    return c.role === 'offerer'
+      ? `Menunggu ${otherName} patuh. Baki ${held} ditahan.`
+      : `Patuhi syarat untuk dapat baki ${held}.`;
+  }
+  if (c.status === 'breached') {
+    return c.role === 'offerer'
+      ? `${otherName} mungkir! Baki ${held} sudah dipulangkan kepada anda. Dedahkan dia untuk menghukumnya.`
+      : `Anda melanggar syarat. Baki ${held} hilang dan ${otherName} boleh mendedahkan anda.`;
+  }
+  if (c.status === 'fulfilled') return 'Selesai — syarat dipenuhi.';
+  if (c.status === 'expired') return 'Tamat — tiada siapa bersalah. Baki dipulangkan.';
+  return c.role === 'offerer' ? `Anda mendedahkan ${otherName}.` : `${otherName} mendedahkan anda.`;
+}
+
+function renderContractsList(snapshot) {
+  const list = $('#contracts-list');
+  list.innerHTML = '';
+  const nameOf = (id) => snapshot.players.find((p) => p.id === id)?.name || 'seorang pemain';
+  const contracts = [...(snapshot.contracts || [])].sort((a, b) => Number(isContractLive(b)) - Number(isContractLive(a)));
+  if (!contracts.length) {
+    const empty = document.createElement('p');
+    empty.className = 'feed-empty';
+    empty.textContent = 'Tiada kontrak. Tawar Backroom Deal dengan syarat untuk membuatnya.';
+    list.appendChild(empty);
+    return;
+  }
+  contracts.forEach((c) => {
+    const otherName = nameOf(c.role === 'offerer' ? c.targetId : c.offererId);
+    const card = document.createElement('div');
+    card.className = `contract-card is-${c.status}`;
+
+    const head = document.createElement('div');
+    head.className = 'contract-head';
+    const who = document.createElement('strong');
+    who.textContent = c.role === 'offerer' ? `Anda → ${otherName}` : `${otherName} → Anda`;
+    const status = document.createElement('span');
+    status.className = 'contract-status';
+    status.textContent = CONTRACT_STATUS_LABELS[c.status] || c.status;
+    head.append(who, status);
+
+    const pay = document.createElement('p');
+    pay.className = 'contract-pay';
+    pay.textContent = `${describePayment({ money: c.money, influence: c.influence })} · dibayar ${describePayment(c.upfront)} · ditahan ${describePayment(c.held)}`;
+
+    const terms = document.createElement('p');
+    terms.className = 'contract-terms';
+    terms.textContent = `Syarat: ${describeCondition(c.condition, nameOf)}`;
+
+    const note = document.createElement('p');
+    note.className = 'contract-note';
+    note.textContent = contractStatusNote(c, otherName);
+
+    card.append(head, pay, terms, note);
+
+    if (c.status === 'breached' && c.role === 'offerer') {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'menu-btn menu-btn-primary contract-expose';
+      btn.innerHTML = '<span class="menu-btn-label">Dedahkan</span>';
+      btn.addEventListener('click', () => {
+        sound.playWarning();
+        match.exposeBackroomContract(c.id);
+      });
+      card.appendChild(btn);
+    }
+    list.appendChild(card);
+  });
 }
 
 function wireMatchActions() {
@@ -1845,6 +2065,16 @@ function wireMatchActions() {
     match.requestMarketOffers();
   });
 
+  $('#btn-contracts').addEventListener('click', () => {
+    sound.playClick();
+    renderContractsList(match.getMatchSnapshot());
+    $('#contracts-modal').hidden = false;
+  });
+
+  $('#btn-contracts-close').addEventListener('click', () => {
+    $('#contracts-modal').hidden = true;
+  });
+
   // Backroom Deal is never turn-gated - available any time to any player.
   $('#btn-backroom-deal').addEventListener('click', () => {
     sound.playClick();
@@ -1883,7 +2113,9 @@ function wireMatchActions() {
       return;
     }
     sound.playClick();
-    match.proposeBackroomDeal(currentDealTargetId, money, influence);
+    const snapshot = match.getMatchSnapshot();
+    const condition = readDealCondition(snapshot, findLocalPlayer(snapshot));
+    match.proposeBackroomDeal(currentDealTargetId, money, influence, condition);
     $('#deal-offer-modal').hidden = true;
     showToast('Offer sent secretly.');
   });
@@ -1917,6 +2149,7 @@ function wireMatchActions() {
     wasMyTurn = false;
     hadKabel = false;
     hideActionStory();
+    $('#contracts-modal').hidden = true;
   });
 
   $('#btn-match-end-menu').addEventListener('click', () => {
@@ -1977,6 +2210,17 @@ function wireMatchEvents() {
     if (money) parts.push(formatMoney(money));
     if (influence) parts.push(`${influence} Influence`);
     $('#deal-incoming-description').textContent = `${fromName} secretly offers you ${parts.join(' + ')}.`;
+    const terms = $('#deal-incoming-terms');
+    const { condition } = e.detail;
+    if (condition && condition.type !== 'none') {
+      const snapshot = match.getMatchSnapshot();
+      const nameOf = (id) => snapshot.players.find((p) => p.id === id)?.name || 'seorang pemain';
+      const { upfront, held } = splitPayment(money || 0, influence || 0);
+      terms.textContent = `Syarat: ${describeCondition(condition, nameOf)}. Anda dapat ${describePayment(upfront)} sekarang; ${describePayment(held)} lagi ditahan sehingga anda patuh. Kalau anda mungkir, baki hilang dan ${fromName} boleh mendedahkan anda (+${GAME_BALANCE.backroomDeals.exposeTargetScandal}% Skandal, tanda Pecah Amanah).`;
+      terms.hidden = false;
+    } else {
+      terms.hidden = true;
+    }
     $('#deal-incoming-overlay').hidden = false;
     sound.playWarning();
   });
@@ -1992,6 +2236,11 @@ function wireMatchEvents() {
       message = fellThrough ? 'Your offer fell through — you no longer had enough to cover it.' : 'Your offer was declined.';
     } else if (leaked) {
       message = 'Your backroom deal leaked! You will skip your next turn.';
+    } else if (e.detail.condition && e.detail.condition.type !== 'none') {
+      const other = match.getMatchSnapshot().players.find((p) => p.id === e.detail.otherId)?.name || 'mereka';
+      message = role === 'offerer'
+        ? `Kontrak dimeterai — ${describePayment(e.detail.upfront)} dibayar, ${describePayment(e.detail.held)} ditahan sehingga ${other} patuh.`
+        : `Kontrak dimeterai — anda terima ${describePayment(e.detail.upfront)}; ${describePayment(e.detail.held)} lagi bila anda patuhi syarat.`;
     } else if (role === 'offerer') {
       message = `Deal done — you paid ${amountText}.`;
     } else {
@@ -1999,6 +2248,29 @@ function wireMatchEvents() {
     }
     showToast(message, 4500);
     if (accepted && !leaked) sound.playCoins(); else if (leaked) sound.playWarning(); else sound.playClick();
+  });
+
+  bus.on('match:deal-contract-event', (e) => {
+    const { kind, role, otherId, contract } = e.detail;
+    const snapshot = match.getMatchSnapshot();
+    const other = snapshot.players.find((p) => p.id === otherId)?.name || 'mereka';
+    const held = describePayment(contract.held);
+    const messages = {
+      fulfilled: role === 'target'
+        ? `✅ Syarat dipenuhi — anda terima baki ${held}.`
+        : `✅ ${other} menepati janji — baki ${held} dibayar kepada mereka.`,
+      breached: role === 'offerer'
+        ? `⚠️ ${other} memungkiri janji! Baki ${held} dipulangkan. Buka Kontrak untuk Dedahkan.`
+        : `⚠️ Anda melanggar syarat — baki ${held} hilang, dan ${other} boleh mendedahkan anda.`,
+      expired: role === 'offerer'
+        ? `Kontrak dengan ${other} tamat — baki ${held} dipulangkan kepada anda.`
+        : `Kontrak dengan ${other} tamat tanpa masalah — baki ${held} tidak dibayar.`,
+      exposed: role === 'offerer'
+        ? `🗂️ Anda mendedahkan ${other}.`
+        : `🗂️ ${other} mendedahkan anda! +${GAME_BALANCE.backroomDeals.exposeTargetScandal}% Skandal dan tanda Pecah Amanah.`,
+    };
+    showToast(messages[kind] || 'Kontrak dikemas kini.', 5500);
+    if (kind === 'fulfilled') sound.playCoins(); else sound.playWarning();
   });
 
   bus.on('match:objective-complete', (e) => {

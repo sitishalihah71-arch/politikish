@@ -78,6 +78,8 @@ export function initMatchState(player) {
   // Set by backroomDeals.js when a bribe leaks; consumed automatically the
   // next time this player's turn comes up (see match.js's advanceTurn).
   player.skipNextTurn = false;
+  // Public count of exposed broken Backroom contracts ("Pecah Amanah").
+  player.betrayals = 0;
   // Assigned properly by objectives.js's assignSecretObjective right after
   // this runs - completely private, masked out of every other player's
   // view exactly like politicalNetwork/hasKabel above (see match.js's
