@@ -177,3 +177,15 @@ export function decideDealResponse(bot, offer) {
   const threshold = cfg.dealAcceptMinValue * (1 - Math.min(bot.scandal, 100) / 200);
   return total >= threshold;
 }
+
+// Bots don't negotiate: when a human writes to one in a Backroom chat it just
+// answers with a stock line, so the chat never feels dead. This never feeds
+// back into any decision (accepting, breaking a contract) - purely flavour.
+const BOT_CHAT_REPLIES = {
+  pending: ['Hmm... biar saya fikir dulu.', 'Tawaran menarik. Kita lihat nanti.', 'Jangan cakap kuat-kuat, dinding ada telinga.'],
+  contract: ['Jangan risau, saya pegang janji.', 'Sabar. Saya tahu apa saya buat.', 'Kita sama-sama untung, bukan?', 'Dah janji, janji lah.'],
+};
+
+export function pickBotChatReply(kind = 'contract') {
+  return randomChoice(BOT_CHAT_REPLIES[kind] || BOT_CHAT_REPLIES.contract);
+}

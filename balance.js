@@ -147,6 +147,22 @@ export const GAME_BALANCE = {
     exposeTargetScandal: 30,
     exposeOffererScandal: 10,
     botBreakChance: 25, // chance a bot that accepts a contract means to betray it
+
+    // "Jaminan" (guarantee): Dedahkan always succeeds. The refund is the whole
+    // up-front payment; whatever the target can no longer cover is taken as a
+    // negative balance (debt, "hutang") that later income pays off first. No
+    // number here on purpose - the guarantee has no cap.
+
+    // Private chat between the two parties of a pending deal / contract. Lives
+    // host-side only; every figure below is enforced by the host.
+    chat: {
+      maxLength: 200, // characters per message
+      minIntervalMs: 800, // gap between two messages from the same sender
+      burstWindowMs: 10000,
+      burstMax: 6, // at most this many messages per sender per window
+      maxMessages: 150, // per conversation (both directions together)
+      botReplyDelayMs: 1400,
+    },
   },
 
   // Approval Rating is a second public-standing meter alongside Scandal

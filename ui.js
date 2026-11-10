@@ -481,6 +481,10 @@ const ACTION_REJECT_MESSAGES = {
   'condition-unavailable': 'Syarat itu tak tersedia sekarang.',
   'invalid-victim': 'Sasaran Sabotaj itu tak sah.',
   'condition-pointless': 'Syarat itu tak bermakna - anda berdua tak berebut kerusi yang sama.',
+  'chat-not-allowed': 'Sembang ini sudah ditutup — tiada tawaran atau kontrak antara anda berdua.',
+  'chat-too-fast': 'Perlahan sikit — mesej terlalu laju.',
+  'chat-thread-full': 'Sembang ini sudah penuh.',
+  'chat-empty': 'Tulis sesuatu dulu.',
 };
 
 let hasEnteredMatchScreen = false;
@@ -550,7 +554,7 @@ function renderMatchPlayerList(snapshot) {
       const stats = document.createElement('div');
       stats.className = 'player-card-stats';
       const scandalClass = player.scandal >= 60 ? ' stat-scandal-warn' : '';
-      stats.innerHTML = `<span title="Duit">${formatMoney(player.money)}</span><span title="Influence">${player.influence} Inf</span><span class="${scandalClass}" title="Skandal">${player.scandal}%</span>`;
+      stats.innerHTML = `<span title="${player.money < 0 ? 'Hutang' : 'Duit'}"${player.money < 0 ? ' class="stat-debt"' : ''}>${formatMoney(player.money)}</span><span title="Influence">${player.influence} Inf</span><span class="${scandalClass}" title="Skandal">${player.scandal}%</span>`;
       info.appendChild(stats);
       card.appendChild(info);
 
@@ -944,6 +948,7 @@ function renderBottomBar(snapshot) {
   const localPlayer = findLocalPlayer(snapshot);
   if (!localPlayer) return;
   $('#bottom-money').textContent = formatMoney(localPlayer.money);
+  $('#bottom-money').classList.toggle('stat-debt', localPlayer.money < 0);
   $('#bottom-influence').textContent = String(localPlayer.influence);
   $('#bottom-scandal').textContent = `${localPlayer.scandal}%`;
   $('#bottom-rank').textContent = RANK_LABELS[localPlayer.rank];
@@ -1220,7 +1225,7 @@ function openDealOfferModal(target) {
 
   const moneySlider = $('#deal-offer-money-slider');
   moneySlider.min = '0';
-  moneySlider.max = String(localPlayer.money);
+  moneySlider.max = String(Math.max(0, localPlayer.money)); // a debtor has nothing to offer
   moneySlider.step = '1000';
   moneySlider.value = '0';
   moneySlider.oninput = () => {
@@ -1230,7 +1235,7 @@ function openDealOfferModal(target) {
 
   const influenceSlider = $('#deal-offer-influence-slider');
   influenceSlider.min = '0';
-  influenceSlider.max = String(localPlayer.influence);
+  influenceSlider.max = String(Math.max(0, localPlayer.influence));
   influenceSlider.step = '50';
   influenceSlider.value = '0';
   influenceSlider.oninput = () => {
@@ -1339,9 +1344,15 @@ function updateDealConditionNote(snapshot, localPlayer, target) {
   const money = Number($('#deal-offer-money-slider').value);
   const influence = Number($('#deal-offer-influence-slider').value);
   const { upfront, held } = splitPayment(money, influence);
-  note.textContent = `Syarat: ${describeCondition(preview, nameOf)}. ${describePayment(upfront)} dibayar sekarang; ${describePayment(held)} ditahan — ke ${target.name} kalau patuh, balik kepada anda kalau mungkir. Kalau mungkir, anda boleh Dedahkan dia.`;
+  note.textContent = `Syarat: ${describeCondition(preview, nameOf)}. ${describePayment(upfront)} dibayar sekarang; ${describePayment(held)} ditahan — ke ${target.name} kalau patuh, balik kepada anda kalau mungkir. Kalau mungkir, anda boleh Dedahkan dia. 🛡️ ${GUARANTEE_OFFERER_COPY(upfront)}`;
   note.hidden = false;
 }
+
+// "Jaminan": Dedahkan always succeeds - see backroomDeals.js's exposeContract.
+const GUARANTEE_OFFERER_COPY = (upfront) =>
+  `Dedahkan dijamin: kalau dia mungkir, dia mesti pulangkan ${describePayment(upfront)} yang dibayar awal — walaupun sudah habis, bakinya jadi hutang dia.`;
+const GUARANTEE_TARGET_COPY = (upfront) =>
+  `Dedahkan dijamin: kalau didedahkan, anda mesti pulangkan ${describePayment(upfront)} yang anda terima — walaupun sudah dibelanjakan, bakinya jadi hutang (baki negatif).`;
 
 function describePayment(amount) {
   const parts = [];
@@ -1892,6 +1903,7 @@ function renderMatchScreen(snapshot) {
 
   if (!hasEnteredMatchScreen) {
     hasEnteredMatchScreen = true;
+    resetBackroomChatUi();
     matchFeed.length = 0;
     renderFeed();
     showScreen('match');
@@ -1910,9 +1922,194 @@ function renderMatchScreen(snapshot) {
   wasMyTurn = isMyTurnNow;
 }
 
+// ---------- Backroom chat (private; the host keeps the record) ----------
+// The chat panel is a small self-contained widget mounted into a pending-offer
+// card, a contract card, or the incoming-deal prompt. Messages only ever
+// arrive from the host and only for conversations the local player is in.
+
+const chatThreads = new Map(); // otherId -> message entries from the host
+const chatUnread = new Map(); // otherId -> unread count
+const chatDrafts = new Map(); // otherId -> unsent text, survives list re-renders
+const chatHistoryRequested = new Set();
+const chatOpen = new Set(); // otherIds whose panel the player has expanded
+let contractsSignature = '';
+
+function resetBackroomChatUi() {
+  chatThreads.clear();
+  chatUnread.clear();
+  chatDrafts.clear();
+  chatHistoryRequested.clear();
+  chatOpen.clear();
+  contractsSignature = '';
+  updateChatDot();
+}
+
+function updateChatDot() {
+  const total = [...chatUnread.values()].reduce((a, b) => a + b, 0);
+  $('#contracts-chat-dot').hidden = total === 0;
+}
+
+function playerNameById(id) {
+  return match.getMatchSnapshot().players.find((p) => p.id === id)?.name || 'seorang pemain';
+}
+
+function renderChatLogs(otherId) {
+  $$(`.chat-panel[data-other="${CSS.escape(otherId)}"]`).forEach(renderChatLog);
+}
+
+function renderChatLog(panel) {
+  const otherId = panel.dataset.other;
+  const log = panel.querySelector('.chat-log');
+  const nearBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 40;
+  log.innerHTML = '';
+  const messages = chatThreads.get(otherId) || [];
+  if (!messages.length) {
+    const empty = document.createElement('p');
+    empty.className = 'chat-empty';
+    empty.textContent = 'Belum ada mesej. Hanya anda berdua boleh baca ini.';
+    log.appendChild(empty);
+  }
+  const localId = match.getMatchSnapshot().localPlayerId;
+  messages.forEach((m) => {
+    const mine = m.from === localId;
+    const row = document.createElement('div');
+    row.className = `chat-msg ${mine ? 'is-mine' : 'is-theirs'}`;
+    const meta = document.createElement('span');
+    meta.className = 'chat-meta';
+    meta.textContent = `${mine ? 'Anda' : playerNameById(m.from)} · Ronda ${m.round}`;
+    const text = document.createElement('span');
+    text.className = 'chat-text';
+    text.textContent = m.text; // never innerHTML: this is another player's text
+    row.append(meta, text);
+    log.appendChild(row);
+  });
+  if (nearBottom || messages.length <= 1) log.scrollTop = log.scrollHeight;
+}
+
+function markChatRead(otherId) {
+  if (!chatUnread.get(otherId)) return;
+  chatUnread.delete(otherId);
+  updateChatDot();
+  $$(`.chat-toggle[data-other="${CSS.escape(otherId)}"] .chat-badge`).forEach((b) => { b.hidden = true; });
+}
+
+function setChatPanelOpen(panel, open) {
+  const otherId = panel.dataset.other;
+  panel.classList.toggle('is-open', open);
+  panel.querySelector('.chat-body').hidden = !open;
+  panel.querySelector('.chat-toggle').setAttribute('aria-expanded', String(open));
+  if (open) {
+    chatOpen.add(otherId);
+    markChatRead(otherId);
+    if (!chatHistoryRequested.has(otherId)) {
+      chatHistoryRequested.add(otherId);
+      match.requestBackroomChatHistory(otherId);
+    }
+    panel.querySelector('.chat-badge').hidden = true;
+    renderChatLog(panel);
+    const log = panel.querySelector('.chat-log');
+    log.scrollTop = log.scrollHeight;
+  } else {
+    chatOpen.delete(otherId);
+  }
+}
+
+function buildChatPanel(otherId) {
+  const otherName = playerNameById(otherId);
+  const maxLength = GAME_BALANCE.backroomDeals.chat.maxLength;
+  const panel = document.createElement('div');
+  panel.className = 'chat-panel';
+  panel.dataset.other = otherId;
+
+  const toggle = document.createElement('button');
+  toggle.type = 'button';
+  toggle.className = 'chat-toggle';
+  toggle.dataset.other = otherId;
+  toggle.setAttribute('aria-expanded', 'false');
+  const label = document.createElement('span');
+  label.textContent = `💬 Sembang dengan ${otherName}`;
+  const badge = document.createElement('b');
+  badge.className = 'chat-badge';
+  const unread = chatUnread.get(otherId) || 0;
+  badge.textContent = String(unread);
+  badge.hidden = unread === 0;
+  toggle.append(label, badge);
+
+  const body = document.createElement('div');
+  body.className = 'chat-body';
+  body.hidden = true;
+  const log = document.createElement('div');
+  log.className = 'chat-log';
+  log.setAttribute('role', 'log');
+  log.setAttribute('aria-live', 'polite');
+
+  const form = document.createElement('form');
+  form.className = 'chat-form';
+  form.autocomplete = 'off';
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.className = 'chat-input';
+  input.maxLength = maxLength;
+  input.placeholder = 'Bisik sesuatu…';
+  input.enterKeyHint = 'send';
+  input.autocomplete = 'off';
+  input.setAttribute('aria-label', `Mesej kepada ${otherName}`);
+  input.value = chatDrafts.get(otherId) || '';
+  input.addEventListener('input', () => chatDrafts.set(otherId, input.value));
+  const send = document.createElement('button');
+  send.type = 'submit';
+  send.className = 'chat-send';
+  send.textContent = 'Hantar';
+  form.append(input, send);
+  form.addEventListener('submit', (e) => {
+    e.preventDefault();
+    const text = input.value.trim();
+    if (!text) return;
+    sound.playClick();
+    match.sendBackroomChat(otherId, text);
+    input.value = '';
+    chatDrafts.delete(otherId);
+    input.focus();
+  });
+
+  body.append(log, form);
+  panel.append(toggle, body);
+  toggle.addEventListener('click', () => setChatPanelOpen(panel, !panel.classList.contains('is-open')));
+  if (chatOpen.has(otherId)) setChatPanelOpen(panel, true);
+  return panel;
+}
+
+function onChatMessage({ otherId, message }) {
+  const thread = chatThreads.get(otherId) || [];
+  if (!thread.some((m) => m.id === message.id)) thread.push(message);
+  chatThreads.set(otherId, thread);
+  renderChatLogs(otherId);
+  if (message.from === match.getMatchSnapshot().localPlayerId) return;
+
+  // Is the panel for this person actually on screen right now?
+  const visible = $$(`.chat-panel.is-open[data-other="${CSS.escape(otherId)}"]`).some((p) => p.offsetParent !== null);
+  if (visible) return;
+  // A deal prompt that is already up: show the new message there directly.
+  const incomingPanel = $('#deal-incoming-chat .chat-panel');
+  if (!$('#deal-incoming-overlay').hidden && incomingPanel?.dataset.other === otherId) {
+    setChatPanelOpen(incomingPanel, true);
+    return;
+  }
+  chatUnread.set(otherId, (chatUnread.get(otherId) || 0) + 1);
+  updateChatDot();
+  $$(`.chat-toggle[data-other="${CSS.escape(otherId)}"] .chat-badge`).forEach((b) => {
+    b.textContent = String(chatUnread.get(otherId));
+    b.hidden = false;
+  });
+  const preview = message.text.length > 60 ? `${message.text.slice(0, 57)}…` : message.text;
+  showToast(`💬 ${playerNameById(otherId)}: ${preview}`, 4500);
+  sound.playClick();
+}
+
 // ---------- Backroom contracts (private: only the two parties ever see them) ----------
 
 const CONTRACT_STATUS_LABELS = {
+  pending: 'MENUNGGU',
   active: 'AKTIF',
   breached: 'DILANGGAR',
   fulfilled: 'DIPENUHI',
@@ -1926,14 +2123,28 @@ function isContractLive(contract) {
   return contract.status === 'active' || (contract.status === 'breached' && contract.role === 'offerer');
 }
 
+// Cheap fingerprint of everything the list shows, so the (re-rendered on every
+// match update) list is only rebuilt when it actually changed - otherwise a
+// turn change would drop focus from a chat box mid-sentence.
+function contractsFingerprint(snapshot) {
+  return JSON.stringify([
+    (snapshot.contracts || []).map((c) => [c.id, c.status]),
+    (snapshot.pendingDeals || []).map((d) => d.dealId),
+  ]);
+}
+
 function renderContractsChip(snapshot) {
   const contracts = snapshot.contracts || [];
+  const pending = snapshot.pendingDeals || [];
   const chip = $('#btn-contracts');
-  chip.hidden = contracts.length === 0;
+  chip.hidden = contracts.length === 0 && pending.length === 0;
   const live = contracts.filter(isContractLive);
-  $('#contracts-count').textContent = String(live.length);
+  $('#contracts-count').textContent = String(live.length + pending.length);
   chip.classList.toggle('has-alert', contracts.some((c) => c.status === 'breached' && c.role === 'offerer'));
-  if (!$('#contracts-modal').hidden) renderContractsList(snapshot);
+  if (!$('#contracts-modal').hidden) {
+    const fingerprint = contractsFingerprint(snapshot);
+    if (fingerprint !== contractsSignature) renderContractsList(snapshot);
+  }
 }
 
 function contractStatusNote(c, otherName) {
@@ -1955,18 +2166,52 @@ function contractStatusNote(c, otherName) {
 
 function renderContractsList(snapshot) {
   const list = $('#contracts-list');
+  // Keep a half-typed message (and the keyboard) across a rebuild.
+  const focused = document.activeElement?.classList?.contains('chat-input') ? document.activeElement : null;
+  const focusedOther = focused?.closest('.chat-panel')?.dataset.other;
+  const caret = focused ? focused.selectionStart : 0;
+  contractsSignature = contractsFingerprint(snapshot);
   list.innerHTML = '';
   const nameOf = (id) => snapshot.players.find((p) => p.id === id)?.name || 'seorang pemain';
+  const pending = snapshot.pendingDeals || [];
   const contracts = [...(snapshot.contracts || [])].sort((a, b) => Number(isContractLive(b)) - Number(isContractLive(a)));
-  if (!contracts.length) {
+  if (!contracts.length && !pending.length) {
     const empty = document.createElement('p');
     empty.className = 'feed-empty';
     empty.textContent = 'Tiada kontrak. Tawar Backroom Deal dengan syarat untuk membuatnya.';
     list.appendChild(empty);
     return;
   }
+
+  // Offers still waiting for an answer: the offerer can already talk it over.
+  pending.forEach((d) => {
+    const otherName = nameOf(d.targetId);
+    const card = document.createElement('div');
+    card.className = 'contract-card is-pending';
+    const head = document.createElement('div');
+    head.className = 'contract-head';
+    const who = document.createElement('strong');
+    who.textContent = `Tawaran: Anda → ${otherName}`;
+    const status = document.createElement('span');
+    status.className = 'contract-status';
+    status.textContent = CONTRACT_STATUS_LABELS.pending;
+    head.append(who, status);
+    const pay = document.createElement('p');
+    pay.className = 'contract-pay';
+    pay.textContent = describePayment({ money: d.money, influence: d.influence });
+    const terms = document.createElement('p');
+    terms.className = 'contract-terms';
+    terms.textContent = `Syarat: ${describeCondition(d.condition, nameOf)}`;
+    const note = document.createElement('p');
+    note.className = 'contract-note';
+    note.textContent = `Menunggu ${otherName} menjawab. Anda boleh bersembang untuk memujuknya.`;
+    card.append(head, pay, terms, note, buildChatPanel(d.targetId));
+    list.appendChild(card);
+  });
+
   contracts.forEach((c) => {
-    const otherName = nameOf(c.role === 'offerer' ? c.targetId : c.offererId);
+    const otherId = c.role === 'offerer' ? c.targetId : c.offererId;
+    const otherName = nameOf(otherId);
     const card = document.createElement('div');
     card.className = `contract-card is-${c.status}`;
 
@@ -1993,6 +2238,13 @@ function renderContractsList(snapshot) {
 
     card.append(head, pay, terms, note);
 
+    if (c.status === 'active' || c.status === 'breached') {
+      const guarantee = document.createElement('p');
+      guarantee.className = 'contract-guarantee';
+      guarantee.textContent = `🛡️ ${c.role === 'offerer' ? GUARANTEE_OFFERER_COPY(c.upfront) : GUARANTEE_TARGET_COPY(c.upfront)}`;
+      card.appendChild(guarantee);
+    }
+
     if (c.status === 'breached' && c.role === 'offerer') {
       const btn = document.createElement('button');
       btn.type = 'button';
@@ -2004,8 +2256,17 @@ function renderContractsList(snapshot) {
       });
       card.appendChild(btn);
     }
+    card.appendChild(buildChatPanel(otherId));
     list.appendChild(card);
   });
+
+  if (focusedOther) {
+    const input = list.querySelector(`.chat-panel[data-other="${CSS.escape(focusedOther)}"] .chat-input`);
+    if (input) {
+      input.focus();
+      input.setSelectionRange(caret, caret);
+    }
+  }
 }
 
 function wireMatchActions() {
@@ -2123,6 +2384,7 @@ function wireMatchActions() {
   $('#btn-deal-accept').addEventListener('click', () => {
     sound.playClick();
     $('#deal-incoming-overlay').hidden = true;
+    $('#deal-incoming-chat').innerHTML = '';
     if (currentIncomingDeal) match.respondToBackroomDeal(currentIncomingDeal.dealId, true);
     currentIncomingDeal = null;
   });
@@ -2130,6 +2392,7 @@ function wireMatchActions() {
   $('#btn-deal-reject').addEventListener('click', () => {
     sound.playClick();
     $('#deal-incoming-overlay').hidden = true;
+    $('#deal-incoming-chat').innerHTML = '';
     if (currentIncomingDeal) match.respondToBackroomDeal(currentIncomingDeal.dealId, false);
     currentIncomingDeal = null;
   });
@@ -2150,6 +2413,8 @@ function wireMatchActions() {
     hadKabel = false;
     hideActionStory();
     $('#contracts-modal').hidden = true;
+    $('#deal-incoming-overlay').hidden = true;
+    resetBackroomChatUi();
   });
 
   $('#btn-match-end-menu').addEventListener('click', () => {
@@ -2216,13 +2481,27 @@ function wireMatchEvents() {
       const snapshot = match.getMatchSnapshot();
       const nameOf = (id) => snapshot.players.find((p) => p.id === id)?.name || 'seorang pemain';
       const { upfront, held } = splitPayment(money || 0, influence || 0);
-      terms.textContent = `Syarat: ${describeCondition(condition, nameOf)}. Anda dapat ${describePayment(upfront)} sekarang; ${describePayment(held)} lagi ditahan sehingga anda patuh. Kalau anda mungkir, baki hilang dan ${fromName} boleh mendedahkan anda (+${GAME_BALANCE.backroomDeals.exposeTargetScandal}% Skandal, tanda Pecah Amanah).`;
+      terms.textContent = `Syarat: ${describeCondition(condition, nameOf)}. Anda dapat ${describePayment(upfront)} sekarang; ${describePayment(held)} lagi ditahan sehingga anda patuh. Kalau anda mungkir, baki hilang dan ${fromName} boleh mendedahkan anda (+${GAME_BALANCE.backroomDeals.exposeTargetScandal}% Skandal, tanda Pecah Amanah). 🛡️ ${GUARANTEE_TARGET_COPY(upfront)}`;
       terms.hidden = false;
     } else {
       terms.hidden = true;
     }
+    // Chat with the offerer before deciding. Collapsed unless they already wrote.
+    const mount = $('#deal-incoming-chat');
+    mount.innerHTML = '';
+    const panel = buildChatPanel(e.detail.fromId);
+    mount.appendChild(panel);
+    if ((chatUnread.get(e.detail.fromId) || 0) > 0) setChatPanelOpen(panel, true);
     $('#deal-incoming-overlay').hidden = false;
     sound.playWarning();
+  });
+
+  bus.on('match:deal-chat', (e) => onChatMessage(e.detail));
+  bus.on('match:deal-chat-history', (e) => {
+    const { otherId, messages } = e.detail;
+    // The host's record is the authority: replace whatever we had.
+    chatThreads.set(otherId, messages || []);
+    renderChatLogs(otherId);
   });
 
   bus.on('match:deal-result', (e) => {

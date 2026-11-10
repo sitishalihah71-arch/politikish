@@ -5607,3 +5607,204 @@ body[data-screen="lobby"] .global-corner-icons {
     align-self: flex-end;
   }
 }
+
+/* ---------- Backroom chat + guarantee ---------- */
+.contracts-chat-dot {
+  font-size: 13px;
+  line-height: 1;
+  animation: contract-alert 1.4s ease-in-out infinite;
+}
+
+.contracts-chat-dot[hidden] {
+  display: none;
+}
+
+.stat-debt {
+  color: var(--np-red);
+  font-weight: 800;
+}
+
+.contract-card.is-pending {
+  border-style: dashed;
+  border-color: var(--np-purple);
+}
+
+.contract-card.is-pending .contract-status {
+  background: var(--np-purple);
+  border-color: var(--np-purple);
+  color: var(--paper-2);
+}
+
+.contract-guarantee {
+  margin: 0;
+  padding: 6px 9px;
+  border-left: 4px solid var(--np-green);
+  background: var(--paper-3);
+  font: 600 14px/1.4 var(--np-body);
+  color: var(--ink-2);
+}
+
+.chat-mount:empty {
+  display: none;
+}
+
+.chat-panel {
+  margin-top: 6px;
+  border: 2px solid var(--ink);
+  background: var(--paper-3);
+  text-align: left;
+}
+
+.chat-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  min-height: 44px; /* comfortable thumb target */
+  padding: 6px 12px;
+  background: var(--paper-2);
+  border: 0;
+  font: 700 15px var(--np-condensed);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.chat-panel.is-open .chat-toggle {
+  background: var(--ink);
+  color: var(--paper-2);
+}
+
+.chat-badge {
+  min-width: 20px;
+  padding: 1px 6px;
+  background: var(--np-red);
+  color: var(--paper-2);
+  font: 700 13px var(--np-condensed);
+  text-align: center;
+}
+
+.chat-badge[hidden] {
+  display: none;
+}
+
+.chat-body[hidden] {
+  display: none;
+}
+
+.chat-log {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  height: 180px;
+  max-height: 32vh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 10px;
+  border-bottom: 1px solid var(--ink-3);
+}
+
+.chat-empty {
+  margin: auto;
+  font: italic 400 14px/1.4 var(--np-body);
+  color: var(--ink-3);
+  text-align: center;
+}
+
+.chat-msg {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  max-width: 85%;
+  padding: 5px 9px;
+  border: 1px solid var(--ink);
+  overflow-wrap: anywhere;
+}
+
+.chat-msg.is-mine {
+  align-self: flex-end;
+  background: var(--paper-2);
+}
+
+.chat-msg.is-theirs {
+  align-self: flex-start;
+  background: #f1e4bb;
+}
+
+.chat-meta {
+  font: 700 11px var(--np-condensed);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+
+.chat-text {
+  font: 400 15px/1.35 var(--np-body);
+  color: var(--ink);
+  white-space: pre-wrap;
+}
+
+.chat-form {
+  display: flex;
+  gap: 6px;
+  padding: 8px;
+}
+
+.chat-input {
+  flex: 1;
+  min-width: 0;
+  min-height: 44px;
+  padding: 6px 10px;
+  border: 2px solid var(--ink);
+  border-radius: 0;
+  background: #fff;
+  font: 400 16px var(--np-body); /* 16px stops iOS Safari zooming on focus */
+  color: var(--ink);
+}
+
+.chat-send {
+  flex: none;
+  min-height: 44px;
+  padding: 0 14px;
+  border: 2px solid var(--ink);
+  border-radius: 0;
+  background: var(--np-red);
+  font: 700 15px var(--np-condensed);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--paper-2);
+  cursor: pointer;
+}
+
+/* The incoming-deal prompt clips its newspaper masthead; let the body scroll
+   so the chat and the Accept/Reject buttons stay reachable on a phone. */
+.np-modal .deal-incoming-card {
+  overflow-y: auto;
+}
+
+@media (max-width: 480px) {
+  .chat-log {
+    height: 150px;
+    max-height: 28dvh;
+  }
+  .chat-msg {
+    max-width: 92%;
+  }
+}
+
+@media (max-width: 640px) {
+  /* Accept / Reject must stay reachable while the chat is open and the card
+     scrolls. */
+  .np-modal .deal-incoming-card .deal-incoming-actions {
+    position: sticky;
+    bottom: -24px; /* the card's bottom padding */
+    box-sizing: border-box;
+    width: calc(100% + 48px);
+    margin: 0 -24px -24px;
+    padding: 10px 24px 24px;
+    background: var(--paper-2);
+    border-top: 2px solid var(--ink);
+  }
+}

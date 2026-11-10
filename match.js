@@ -28,11 +28,12 @@ import {
   proposeDeal, respondToDeal, resetDeals, getContractViewsFor, getActiveContractsAsTarget,
   getBreachedContractsAsOfferer, handleAction as contractsOnAction, handleVoteResolved as contractsOnVote,
   handleRoundEnd as contractsOnRoundEnd, noteTurnStart as contractsNoteTurnStart, exposeContract,
-  getNextVoteRound,
+  getNextVoteRound, getPendingDealViewsFor, hasDealBetween,
 } from './backroomDeals.js';
+import { recordMessage, getTranscript, resetChats } from './backroomChat.js';
 import { PARLIAMENT_MOTIONS, pickMotion, applyMotion } from './parliament.js';
 import { assignSecretObjective, checkSecretObjective } from './objectives.js';
-import { decideBotAction, decideDealProposal, decideDealResponse } from './bots.js';
+import { decideBotAction, decideDealProposal, decideDealResponse, pickBotChatReply } from './bots.js';
 import { GAME_BALANCE } from './balance.js';
 
 let matchStarted = false;
@@ -106,6 +107,8 @@ let passiveSeq = 0;
 // each client only ever receives its own, riding on its personalised
 // match-update payload.
 let clientContracts = [];
+let clientPendingDeals = []; // this player's own unanswered offers (same privacy)
+const botChatTimers = new Set(); // pending canned bot replies, cleared on reset
 
 function isHostRole() {
   return room.getRoomSnapshot().isHost;
@@ -157,6 +160,7 @@ export function getMatchSnapshot() {
     marketStock: [...marketStock],
     passivePayout,
     contracts: isHostRole() ? getContractViewsFor(roomSnap.localPlayerId) : clientContracts,
+    pendingDeals: isHostRole() ? getPendingDealViewsFor(roomSnap.localPlayerId) : clientPendingDeals,
   };
 }
 
@@ -177,6 +181,7 @@ function buildBroadcastPayloadFor(viewerId) {
     marketStock: [...marketStock],
     passivePayout,
     contracts: getContractViewsFor(viewerId),
+    pendingDeals: getPendingDealViewsFor(viewerId),
   };
 }
 
@@ -189,6 +194,20 @@ function broadcastMatchUpdate() {
     multiplayer.send({ type: 'match-update', payload: buildBroadcastPayloadFor(playerId) }, conn);
   });
   bus.emit('match:updated', getMatchSnapshot());
+}
+
+// Refreshes just the two parties of a deal (their own private contracts /
+// pending offers ride on this) without telling anyone else anything happened.
+function sendUpdateToParties(ids) {
+  const localId = room.getRoomSnapshot().localPlayerId;
+  ids.forEach((id) => {
+    if (id === localId) {
+      bus.emit('match:updated', getMatchSnapshot());
+      return;
+    }
+    const conn = room.getConnectionsByPlayerId().get(id);
+    if (conn) multiplayer.send({ type: 'match-update', payload: buildBroadcastPayloadFor(id) }, conn);
+  });
 }
 
 function determineWinner(players) {
@@ -744,6 +763,8 @@ function hostProposeDeal(offererId, targetId, money, influence, condition, respo
     influence: result.influence,
     condition: result.condition,
   });
+  // The offerer's own copy of the pending offer (what the chat hangs off).
+  sendUpdateToParties([offererId]);
 }
 
 // What backroomDeals.js needs to know about the match around a deal.
@@ -763,6 +784,7 @@ function hostRespondToDeal(responderId, dealId, accept) {
 
   if (!result.accepted) {
     notifyPlayer(result.offererId, 'deal-result', { accepted: false, fellThrough: Boolean(result.fellThrough) });
+    sendUpdateToParties([result.offererId]);
     return;
   }
 
@@ -822,11 +844,15 @@ function hostExposeContract(requesterId, contractId) {
   const players = room.getPlayersLive();
   const result = exposeContract(contractId, requesterId, players);
   if (!result.ok) return;
-  const { offerer, target, refund } = result;
+  const { offerer, target, refund, debt } = result;
   const refundParts = [];
   if (refund.money) refundParts.push(formatMoney(refund.money));
   if (refund.influence) refundParts.push(`${refund.influence} Influence`);
-  const refundText = refundParts.length ? ` ${target.name} dipaksa memulangkan ${refundParts.join(' + ')}.` : '';
+  const debtParts = [];
+  if (debt.money) debtParts.push(formatMoney(debt.money));
+  if (debt.influence) debtParts.push(`${debt.influence} Influence`);
+  const debtText = debtParts.length ? ` Wang sudah habis? Tiada alasan — ${debtParts.join(' + ')} dikira sebagai hutang.` : '';
+  const refundText = refundParts.length ? ` ${target.name} dipaksa memulangkan ${refundParts.join(' + ')}.${debtText}` : '';
   postNews({
     icon: '🗂️',
     headline: 'DOKUMEN RASUAH BOCOR',
@@ -839,6 +865,49 @@ function hostExposeContract(requesterId, contractId) {
   notifyPlayer(offerer.id, 'deal-contract-event', { kind: 'exposed', contract: result.contract, role: 'offerer', otherId: target.id });
   notifyPlayer(target.id, 'deal-contract-event', { kind: 'exposed', contract: result.contract, role: 'target', otherId: offerer.id });
   broadcastMatchUpdate();
+}
+
+// ---------- Backroom chat (private; see backroomChat.js) ----------
+
+function deliverChat(message, aId, bId) {
+  notifyPlayer(aId, 'deal-chat', { otherId: bId, message });
+  notifyPlayer(bId, 'deal-chat', { otherId: aId, message });
+}
+
+// The host is the authority: it checks the two are linked by a deal/contract,
+// records the message, and delivers it to those two players only. A bot on
+// the other end just answers with a stock line.
+function hostSendChat(senderId, otherId, text, respond) {
+  const players = room.getPlayersLive();
+  const sender = players.find((p) => p.id === senderId);
+  const other = players.find((p) => p.id === otherId);
+  if (!sender || !other) return;
+  const result = recordMessage(senderId, otherId, text, currentRound, hasDealBetween(senderId, otherId));
+  if (!result.ok) {
+    respond({ type: 'action-rejected', payload: { reason: `chat-${result.reason}` } });
+    return;
+  }
+  deliverChat(result.message, senderId, otherId);
+
+  if (other.isBot && !sender.isBot) {
+    const timer = setTimeout(() => {
+      botChatTimers.delete(timer);
+      const kind = getContractViewsFor(senderId).some((c) => c.offererId === otherId || c.targetId === otherId) ? 'contract' : 'pending';
+      const reply = recordMessage(otherId, senderId, pickBotChatReply(kind), currentRound, hasDealBetween(senderId, otherId));
+      if (reply.ok) deliverChat(reply.message, otherId, senderId);
+    }, GAME_BALANCE.backroomDeals.chat.botReplyDelayMs);
+    botChatTimers.add(timer);
+  }
+}
+
+function hostChatHistory(requesterId, otherId, respond) {
+  const allowed = hasDealBetween(requesterId, otherId);
+  respond({ type: 'deal-chat-history', payload: { otherId, messages: allowed ? getTranscript(requesterId, otherId) : [] } });
+}
+
+function clearBotChatTimers() {
+  botChatTimers.forEach((t) => clearTimeout(t));
+  botChatTimers.clear();
 }
 
 // What a bot has to do (or may try to dodge) to stay on the right side of
@@ -903,6 +972,10 @@ function handleHostMatchMessage(type, payload, conn) {
     hostRespondToDeal(conn.peer, payload?.dealId, Boolean(payload?.accept));
   } else if (type === 'deal-expose') {
     hostExposeContract(conn.peer, payload?.contractId);
+  } else if (type === 'chat-send') {
+    hostSendChat(conn.peer, payload?.otherId, payload?.text, respond);
+  } else if (type === 'chat-history') {
+    hostChatHistory(conn.peer, payload?.otherId, respond);
   } else if (type === 'vote-cast') {
     // Not turn-gated - any connected player votes while pendingVote is open.
     hostCastVote(conn.peer, payload?.choice);
@@ -934,6 +1007,7 @@ function handleClientMatchMessage(type, payload) {
     marketStock = payload.marketStock || [];
     passivePayout = payload.passivePayout || null;
     clientContracts = payload.contracts || [];
+    clientPendingDeals = payload.pendingDeals || [];
     bus.emit('match:updated', getMatchSnapshot());
   } else if (type === 'projek-offers') {
     bus.emit('match:offers', { action: 'projek', offers: payload.offers });
@@ -949,6 +1023,10 @@ function handleClientMatchMessage(type, payload) {
     bus.emit('match:deal-result', payload);
   } else if (type === 'deal-contract-event') {
     bus.emit('match:deal-contract-event', payload);
+  } else if (type === 'deal-chat') {
+    bus.emit('match:deal-chat', payload);
+  } else if (type === 'deal-chat-history') {
+    bus.emit('match:deal-chat-history', payload);
   } else if (type === 'objective-complete') {
     bus.emit('match:objective-complete', payload);
   } else if (type === 'action-rejected') {
@@ -1081,6 +1159,26 @@ export function respondToBackroomDeal(dealId, accept) {
   }
 }
 
+// Private chat with the other party of a pending deal / contract. Any time,
+// never turn-gated; the host validates and records it.
+export function sendBackroomChat(otherId, text) {
+  if (isHostRole()) {
+    hostSendChat(room.getRoomSnapshot().localPlayerId, otherId, text, (msg) => {
+      bus.emit('match:action-rejected', { reason: msg.payload.reason });
+    });
+  } else {
+    multiplayer.send({ type: 'chat-send', payload: { otherId, text } });
+  }
+}
+
+export function requestBackroomChatHistory(otherId) {
+  if (isHostRole()) {
+    hostChatHistory(room.getRoomSnapshot().localPlayerId, otherId, (msg) => bus.emit('match:deal-chat-history', msg.payload));
+  } else {
+    multiplayer.send({ type: 'chat-history', payload: { otherId } });
+  }
+}
+
 // Parliament Voting is never turn-gated - any connected player can vote
 // while pendingVote is open.
 export function castVote(choice) {
@@ -1117,6 +1215,9 @@ bus.on('room:match-started', () => {
   clearTimeout(voteTimer);
   voteTimer = null;
   resetDeals();
+  resetChats();
+  clearBotChatTimers();
+  clientPendingDeals = [];
 
   const roomSnap = room.getRoomSnapshot();
   maxRounds = roomSnap.settings.rounds;
@@ -1173,6 +1274,7 @@ export function resetMatch() {
   winnerId = null;
   clientPlayers = [];
   clientContracts = [];
+  clientPendingDeals = [];
   kabelClaimed = false;
   pendingNews = null;
   pendingVote = null;
@@ -1183,4 +1285,6 @@ export function resetMatch() {
   clearTimeout(voteTimer);
   voteTimer = null;
   resetDeals();
+  resetChats();
+  clearBotChatTimers();
 }
