@@ -31,8 +31,11 @@ let contractSeq = 0;
 const pendingDeals = new Map(); // dealId -> { offererId, targetId, money, influence, condition }
 let contracts = []; // host-side registry of conditional deals (all statuses)
 
+// Only the currencies actually being offered are checked: a player in debt in
+// one currency (negative Money or Influence, see exposeContract) can still pay
+// in the other.
 function affordable(player, money, influence) {
-  return player.money >= money && player.influence >= influence;
+  return (money === 0 || player.money >= money) && (influence === 0 || player.influence >= influence);
 }
 
 // The round at the end of which the next Parliament session opens, or null
@@ -375,6 +378,12 @@ export function exposeContract(contractId, requesterId, players, ctx = {}) {
 
   applyScandalDelta(target, cfg.exposeTargetScandal);
   applyScandalDelta(offerer, cfg.exposeOffererScandal);
+  if (cfg.exposeScandalCappedBelowPenalty) {
+    // Dedahkan counts on its own: it must not also set off the 100% Scandal
+    // penalty (which would be a second demotion and a 50% Money loss).
+    const cap = GAME_BALANCE.scandal.penaltyThreshold - 1;
+    [target, offerer].forEach((p) => { p.scandal = Math.min(p.scandal, cap); });
+  }
   let ranksLost = 0;
   for (let i = 0; i < cfg.exposeTargetRanksLost; i += 1) {
     if (demoteOneRank(target, players)) ranksLost += 1;

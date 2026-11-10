@@ -151,6 +151,10 @@ export const GAME_BALANCE = {
     // back the up-front payment (see exposeContract); every figure below is
     // on top of that. Fines are burned (paid to nobody). The target's
     // penalties always apply in full - a shortfall becomes debt.
+    // Dedahkan has its own penalties, so the Scandal it adds is capped just
+    // below the 100% threshold: it can never on its own also trigger the
+    // 100% Scandal penalty (-50% Money, lose a seat) on top of them.
+    exposeScandalCappedBelowPenalty: true,
     exposeTargetScandal: 30,
     exposeTargetFineMoney: 5000,
     exposeTargetFineInfluence: 100,

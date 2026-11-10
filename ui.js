@@ -554,7 +554,7 @@ function renderMatchPlayerList(snapshot) {
       const stats = document.createElement('div');
       stats.className = 'player-card-stats';
       const scandalClass = player.scandal >= 60 ? ' stat-scandal-warn' : '';
-      stats.innerHTML = `<span title="${player.money < 0 ? 'Hutang' : 'Duit'}"${player.money < 0 ? ' class="stat-debt"' : ''}>${formatMoney(player.money)}</span><span title="Influence">${player.influence} Inf</span><span class="${scandalClass}" title="Skandal">${player.scandal}%</span>`;
+      stats.innerHTML = `<span title="${player.money < 0 ? 'Hutang' : 'Duit'}"${player.money < 0 ? ' class="stat-debt"' : ''}>${formatMoney(player.money)}</span><span title="${player.influence < 0 ? 'Hutang Influence' : 'Influence'}"${player.influence < 0 ? ' class="stat-debt"' : ''}>${player.influence} Inf</span><span class="${scandalClass}" title="Skandal">${player.scandal}%</span>`;
       info.appendChild(stats);
       card.appendChild(info);
 
@@ -950,6 +950,7 @@ function renderBottomBar(snapshot) {
   $('#bottom-money').textContent = formatMoney(localPlayer.money);
   $('#bottom-money').classList.toggle('stat-debt', localPlayer.money < 0);
   $('#bottom-influence').textContent = String(localPlayer.influence);
+  $('#bottom-influence').classList.toggle('stat-debt', localPlayer.influence < 0);
   $('#bottom-scandal').textContent = `${localPlayer.scandal}%`;
   $('#bottom-rank').textContent = RANK_LABELS[localPlayer.rank];
   $('#status-money').textContent = formatMoney(localPlayer.money);
