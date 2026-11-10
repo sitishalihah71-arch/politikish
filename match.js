@@ -844,20 +844,19 @@ function hostExposeContract(requesterId, contractId) {
   const players = room.getPlayersLive();
   const result = exposeContract(contractId, requesterId, players, { round: currentRound });
   if (!result.ok) return;
-  const { offerer, target, refund, debt } = result;
-  const refundParts = [];
-  if (refund.money) refundParts.push(formatMoney(refund.money));
-  if (refund.influence) refundParts.push(`${refund.influence} Influence`);
-  const debtParts = [];
-  if (debt.money) debtParts.push(formatMoney(debt.money));
-  if (debt.influence) debtParts.push(`${debt.influence} Influence`);
-  const debtText = debtParts.length ? ` Wang sudah habis? Tiada alasan — ${debtParts.join(' + ')} dikira sebagai hutang.` : '';
-  const refundText = refundParts.length ? ` ${target.name} dipaksa memulangkan ${refundParts.join(' + ')}.${debtText}` : '';
+  const { offerer, target, refund, debt, penalty } = result;
+  const cfgD = GAME_BALANCE.backroomDeals;
+  const money = (p) => [p.money ? formatMoney(p.money) : '', p.influence ? `${p.influence} Influence` : ''].filter(Boolean).join(' + ');
+  const refundText = money(refund) ? ` ${target.name} dipaksa memulangkan ${money(refund)}.` : '';
+  const fineText = money(penalty.target) ? ` ${target.name} turut didenda ${money(penalty.target)}.` : '';
+  const seatText = penalty.target.ranksLost ? ` ${target.name} jatuh ${penalty.target.ranksLost} kerusi.` : '';
+  const debtText = money(debt) ? ` Wang sudah habis? Tiada alasan — ${money(debt)} dikira sebagai hutang.` : '';
+  const offererText = penalty.offerer.money ? ` ${offerer.name} didenda ${formatMoney(penalty.offerer.money)}.` : '';
   postNews({
     icon: '🗂️',
     headline: 'DOKUMEN RASUAH BOCOR',
-    description: `${offerer.name} mendedahkan bahawa ${target.name} memungkiri perjanjian sulit mereka. ${target.name} +${GAME_BALANCE.backroomDeals.exposeTargetScandal}% Skandal dan digelar Pecah Amanah; ${offerer.name} +${GAME_BALANCE.backroomDeals.exposeOffererScandal}% Skandal kerana terlibat sama.${refundText}`,
-    feedText: `🗂️ ${offerer.name} mendedahkan ${target.name} — Pecah Amanah! (+${GAME_BALANCE.backroomDeals.exposeTargetScandal}% Skandal)`,
+    description: `${offerer.name} mendedahkan bahawa ${target.name} memungkiri perjanjian sulit mereka. ${target.name} +${cfgD.exposeTargetScandal}% Skandal dan digelar Pecah Amanah; ${offerer.name} +${cfgD.exposeOffererScandal}% Skandal kerana terlibat sama.${refundText}${fineText}${seatText}${debtText}${offererText}`,
+    feedText: `🗂️ ${offerer.name} mendedahkan ${target.name} — Pecah Amanah!${penalty.target.ranksLost ? ` ${target.name} jatuh kerusi.` : ''} (+${cfgD.exposeTargetScandal}% Skandal)`,
     feedType: 'news',
   });
   maybeCompleteObjective(offerer);

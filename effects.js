@@ -64,13 +64,18 @@ export function applyScandalPenalty(player, players) {
   player.scandal = SCANDAL_PENALTY_RESET;
   applyApprovalDelta(player, -GAME_BALANCE.approvalRating.scandalPenaltyPenalty);
 
+  demoteOneRank(player, players);
+  return true;
+}
+
+// Drops a player one rank if there is one below and it has a free seat
+// (best-effort, as above). Returns true if the rank actually changed.
+export function demoteOneRank(player, players) {
   const index = RANKS.indexOf(player.rank);
-  if (index > 0) {
-    const lowerRank = RANKS[index - 1];
-    if (countAtRank(players, lowerRank) < getSeatCapacity(players.length)[lowerRank]) {
-      player.rank = lowerRank;
-    }
-  }
+  if (index <= 0) return false;
+  const lowerRank = RANKS[index - 1];
+  if (countAtRank(players, lowerRank) >= getSeatCapacity(players.length)[lowerRank]) return false;
+  player.rank = lowerRank;
   return true;
 }
 

@@ -20,7 +20,7 @@
 import { GAME_BALANCE } from './balance.js';
 import { RANK_LABELS, getNextRank } from './player.js';
 import { validateSabotaj } from './sabotage.js';
-import { applyScandalDelta } from './effects.js';
+import { applyScandalDelta, demoteOneRank } from './effects.js';
 
 const cfg = GAME_BALANCE.backroomDeals;
 
@@ -168,7 +168,9 @@ export function respondToDeal(dealId, accept, players, ctx = {}, rng = Math.rand
     return { ok: true, accepted: false, fellThrough: true, offererId: deal.offererId, targetId: deal.targetId };
   }
 
-  const leaked = rng() < getLeakChance(offerer.scandal, target.scandal);
+  // Off by default (cfg.leakEnabled): a deal only becomes public when the
+  // offerer chooses to Dedahkan a breached contract.
+  const leaked = Boolean(cfg.leakEnabled) && rng() < getLeakChance(offerer.scandal, target.scandal);
   const base = {
     ok: true, accepted: true,
     offererId: deal.offererId, targetId: deal.targetId,
@@ -231,7 +233,7 @@ function viewOf(c) {
     status: c.status,
     createdRound: c.createdRound,
     // Only once exposed: the record of how it ended.
-    ...(c.status === 'exposed' ? { exposedRound: c.exposedRound, refund: c.refund, debt: c.debt } : {}),
+    ...(c.status === 'exposed' ? { exposedRound: c.exposedRound, refund: c.refund, debt: c.debt, penalty: c.penalty } : {}),
   };
 }
 
@@ -343,9 +345,11 @@ export function noteTurnStart(activePlayer, players) {
 // front, whatever they have left. What they can cover comes out of their
 // balance; the rest is taken as debt - their Money / Influence goes negative
 // (see effects.js's adjustBalance) and their next income pays it off. The
-// offerer is made whole immediately and the Scandal hit + Pecah Amanah mark
-// always apply; the offerer takes a smaller Scandal hit for being in on it.
-// Money is only moved, never created, so the economy stays closed.
+// offerer is made whole immediately. On top of the refund the target pays a
+// fine (Money + Influence), takes a Scandal hit, loses a seat and gets a
+// Pecah Amanah mark - all always applied. The offerer, being in on it, takes
+// a smaller Scandal hit and a Money fine (capped at what they hold) but keeps
+// their seat. Fines are burned; the refund is only moved.
 // reason codes: 'contract-not-found' | 'not-exposable'
 export function exposeContract(contractId, requesterId, players, ctx = {}) {
   const c = contracts.find((x) => x.id === contractId);
@@ -356,25 +360,33 @@ export function exposeContract(contractId, requesterId, players, ctx = {}) {
   if (!offerer || !target) return { ok: false, reason: 'contract-not-found' };
 
   const refund = { money: c.upfront.money, influence: c.upfront.influence };
-  // The part of the refund the target can no longer pay from what they hold.
+  const targetFine = { money: cfg.exposeTargetFineMoney, influence: cfg.exposeTargetFineInfluence };
+  // Whatever the target owes (refund + fine) beyond what they hold is debt.
   const debt = {
-    money: Math.max(0, refund.money - Math.max(target.money, 0)),
-    influence: Math.max(0, refund.influence - Math.max(target.influence, 0)),
+    money: Math.max(0, refund.money + targetFine.money - Math.max(target.money, 0)),
+    influence: Math.max(0, refund.influence + targetFine.influence - Math.max(target.influence, 0)),
   };
-  target.money -= refund.money;
-  target.influence -= refund.influence;
+  target.money -= refund.money + targetFine.money;
+  target.influence -= refund.influence + targetFine.influence;
   offerer.money += refund.money;
   offerer.influence += refund.influence;
+  const offererFine = { money: Math.min(cfg.exposeOffererFineMoney, Math.max(offerer.money, 0)) };
+  offerer.money -= offererFine.money;
 
   applyScandalDelta(target, cfg.exposeTargetScandal);
   applyScandalDelta(offerer, cfg.exposeOffererScandal);
+  let ranksLost = 0;
+  for (let i = 0; i < cfg.exposeTargetRanksLost; i += 1) {
+    if (demoteOneRank(target, players)) ranksLost += 1;
+  }
   target.betrayals = (target.betrayals || 0) + 1;
   c.status = 'exposed';
   c.exposedRound = ctx.round || c.createdRound;
   c.refund = refund;
   c.debt = debt;
+  c.penalty = { target: { ...targetFine, ranksLost }, offerer: offererFine };
 
-  return { ok: true, contract: viewOf(c), refund, debt, offerer, target };
+  return { ok: true, contract: viewOf(c), refund, debt, penalty: c.penalty, offerer, target };
 }
 
 // Pending offers the player has made and not yet had answered - their own

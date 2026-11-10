@@ -1349,10 +1349,21 @@ function updateDealConditionNote(snapshot, localPlayer, target) {
 }
 
 // "Jaminan": Dedahkan always succeeds - see backroomDeals.js's exposeContract.
+const EXPOSE_CFG = GAME_BALANCE.backroomDeals;
+// What the target of an exposed contract pays, in plain words (from balance.js).
+const exposeTargetPenaltyText = () => {
+  const parts = [`denda ${formatMoney(EXPOSE_CFG.exposeTargetFineMoney)}`];
+  if (EXPOSE_CFG.exposeTargetFineInfluence) parts.push(`${EXPOSE_CFG.exposeTargetFineInfluence} Influence`);
+  parts.push(`+${EXPOSE_CFG.exposeTargetScandal}% Skandal`);
+  if (EXPOSE_CFG.exposeTargetRanksLost) parts.push(`turun ${EXPOSE_CFG.exposeTargetRanksLost} kerusi`);
+  parts.push('tanda Pecah Amanah');
+  return parts.join(', ');
+};
+const exposeOffererPenaltyText = () => `denda ${formatMoney(EXPOSE_CFG.exposeOffererFineMoney)}, +${EXPOSE_CFG.exposeOffererScandal}% Skandal, kerusi kekal`;
 const GUARANTEE_OFFERER_COPY = (upfront) =>
-  `Dedahkan dijamin: kalau dia mungkir, dia mesti pulangkan ${describePayment(upfront)} yang dibayar awal — walaupun sudah habis, bakinya jadi hutang dia.`;
+  `Dedahkan dijamin: kalau dia mungkir, dia mesti pulangkan ${describePayment(upfront)} yang dibayar awal dan menanggung ${exposeTargetPenaltyText()} — walaupun sudah habis, bakinya jadi hutang dia. Anda pula: ${exposeOffererPenaltyText()}.`;
 const GUARANTEE_TARGET_COPY = (upfront) =>
-  `Dedahkan dijamin: kalau didedahkan, anda mesti pulangkan ${describePayment(upfront)} yang anda terima — walaupun sudah dibelanjakan, bakinya jadi hutang (baki negatif).`;
+  `Dedahkan dijamin: kalau didedahkan, anda mesti pulangkan ${describePayment(upfront)} yang anda terima dan menanggung ${exposeTargetPenaltyText()} — walaupun sudah dibelanjakan, bakinya jadi hutang (baki negatif).`;
 
 function describePayment(amount) {
   const parts = [];
@@ -2198,9 +2209,16 @@ function renderContractRecords(list, records, nameOf) {
     const note = document.createElement('p');
     note.className = 'contract-note';
     const refund = c.refund ? describePayment(c.refund) : 'RM0';
-    const debt = c.debt && (c.debt.money || c.debt.influence) ? ` (termasuk hutang ${describePayment(c.debt)})` : '';
+    const debt = c.debt && (c.debt.money || c.debt.influence) ? ` Baki yang tak mampu dibayar jadi hutang penerima: ${describePayment(c.debt)}.` : '';
     const who2 = c.role === 'offerer' ? `Anda mendedahkan ${otherName}` : `${otherName} mendedahkan anda`;
-    note.textContent = `${who2} pada ronda ${c.exposedRound || '?'}. Dipulangkan ${refund}${debt}. Sembang ditutup.`;
+    const pen = c.penalty;
+    let penaltyText = '';
+    if (pen) {
+      const targetParts = [`denda ${describePayment(pen.target)}`];
+      if (pen.target.ranksLost) targetParts.push(`turun ${pen.target.ranksLost} kerusi`);
+      penaltyText = ` Penerima: ${targetParts.join(', ')}. Pemberi: denda ${formatMoney(pen.offerer.money)}.`;
+    }
+    note.textContent = `${who2} pada ronda ${c.exposedRound || '?'}. Dipulangkan ${refund}.${penaltyText}${debt} Sembang ditutup.`;
     card.append(head, pay, terms, note);
     list.appendChild(card);
   });
@@ -2550,7 +2568,7 @@ function wireMatchEvents() {
       const snapshot = match.getMatchSnapshot();
       const nameOf = (id) => snapshot.players.find((p) => p.id === id)?.name || 'seorang pemain';
       const { upfront, held } = splitPayment(money || 0, influence || 0);
-      terms.textContent = `Syarat: ${describeCondition(condition, nameOf)}. Anda dapat ${describePayment(upfront)} sekarang; ${describePayment(held)} lagi ditahan sehingga anda patuh. Kalau anda mungkir, baki hilang dan ${fromName} boleh mendedahkan anda (+${GAME_BALANCE.backroomDeals.exposeTargetScandal}% Skandal, tanda Pecah Amanah). 🛡️ ${GUARANTEE_TARGET_COPY(upfront)}`;
+      terms.textContent = `Syarat: ${describeCondition(condition, nameOf)}. Anda dapat ${describePayment(upfront)} sekarang; ${describePayment(held)} lagi ditahan sehingga anda patuh. Kalau anda mungkir, baki hilang dan ${fromName} boleh mendedahkan anda. 🛡️ ${GUARANTEE_TARGET_COPY(upfront)}`;
       terms.hidden = false;
     } else {
       terms.hidden = true;
@@ -2614,8 +2632,8 @@ function wireMatchEvents() {
         ? `Kontrak dengan ${other} tamat — baki ${held} dipulangkan kepada anda.`
         : `Kontrak dengan ${other} tamat tanpa masalah — baki ${held} tidak dibayar.`,
       exposed: role === 'offerer'
-        ? `🗂️ Anda mendedahkan ${other}. Kontrak dipindahkan ke Rekod dan sembang ditutup.`
-        : `🗂️ ${other} mendedahkan anda! +${GAME_BALANCE.backroomDeals.exposeTargetScandal}% Skandal dan tanda Pecah Amanah. Sembang ditutup.`,
+        ? `🗂️ Anda mendedahkan ${other}. Anda kena ${exposeOffererPenaltyText()}. Kontrak dipindahkan ke Rekod, sembang ditutup.`
+        : `🗂️ ${other} mendedahkan anda! Anda kena ${exposeTargetPenaltyText()}. Sembang ditutup.`,
     };
     showToast(messages[kind] || 'Kontrak dikemas kini.', 5500);
     if (kind === 'fulfilled') sound.playCoins(); else sound.playWarning();

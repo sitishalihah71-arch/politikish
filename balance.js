@@ -126,11 +126,14 @@ export const GAME_BALANCE = {
     },
   },
 
-  // Backroom Deals never appear in any broadcast the other players can see
-  // - only the leak roll (checked when the target accepts) has a visible
-  // consequence. Leak chance scales with whichever party is more scandalous,
-  // so a "clean" politician is a safer bribery partner than a scandalous one.
+  // Backroom Deals never appear in any broadcast the other players can see.
+  // The only way one becomes public is the offerer choosing to Dedahkan a
+  // breached contract. The old random "leak" roll (checked when the target
+  // accepts; chance scaled with whichever party was more scandalous) is kept
+  // but switched off: set leakEnabled to true to bring it back (the How to
+  // Play text no longer mentions it).
   backroomDeals: {
+    leakEnabled: false,
     leakBaseChance: 10,
     leakScandalWeightPercent: 60,
     leakMaxChance: 90,
@@ -144,8 +147,16 @@ export const GAME_BALANCE = {
     // already received, a public Scandal hit, and a Pecah Amanah mark.
     heldPercent: 50,
     contractRounds: 2, // window for "don't harm me" / "don't Politik" / "Sabotaj X"
+    // Penalties when a breached contract is exposed. The target also hands
+    // back the up-front payment (see exposeContract); every figure below is
+    // on top of that. Fines are burned (paid to nobody). The target's
+    // penalties always apply in full - a shortfall becomes debt.
     exposeTargetScandal: 30,
+    exposeTargetFineMoney: 5000,
+    exposeTargetFineInfluence: 100,
+    exposeTargetRanksLost: 1, // seats dropped (skipped if there is no free seat below)
     exposeOffererScandal: 10,
+    exposeOffererFineMoney: 5000, // paid from what they have; never pushes them into debt
     botBreakChance: 25, // chance a bot that accepts a contract means to betray it
 
     // "Jaminan" (guarantee): Dedahkan always succeeds. The refund is the whole
