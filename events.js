@@ -6,7 +6,7 @@
 // equally for every player - never targets an individual.
 
 import { randomChoice } from './utils.js';
-import { applyScandalDelta } from './effects.js';
+import { applyScandalDelta, adjustBalance } from './effects.js';
 
 export const NATIONAL_EVENTS = [
   {
@@ -89,14 +89,10 @@ export function applyNationalEvent(event, player) {
   const applied = {};
 
   if (effects.money) {
-    const before = player.money;
-    player.money = Math.max(0, player.money + effects.money);
-    applied.money = player.money - before;
+    applied.money = adjustBalance(player, 'money', effects.money);
   }
   if (effects.influence) {
-    const before = player.influence;
-    player.influence = Math.max(0, player.influence + effects.influence);
-    applied.influence = player.influence - before;
+    applied.influence = adjustBalance(player, 'influence', effects.influence);
   }
   if (effects.scandalDelta) {
     applied.scandal = applyScandalDelta(player, effects.scandalDelta);

@@ -30,7 +30,7 @@ export function pickRandomUnique(arr, count) {
 }
 
 export function formatMoney(amount) {
-  return `RM${amount.toLocaleString('en-MY')}`;
+  return `${amount < 0 ? '-' : ''}RM${Math.abs(amount).toLocaleString('en-MY')}`;
 }
 
 export function generateRoomCode(length = 5) {

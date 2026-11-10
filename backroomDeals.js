@@ -336,10 +336,14 @@ export function noteTurnStart(activePlayer, players) {
   });
 }
 
-// "Dedahkan": only the offerer, only for a breached contract, free. The
-// target hands back what they were paid up front (as much of it as they
-// still have), takes a public Scandal hit and gets a Pecah Amanah mark; the
-// offerer takes a smaller Scandal hit for having been in on it.
+// "Dedahkan": only the offerer, only for a breached contract, free, and
+// GUARANTEED ("jaminan"): the target hands back everything they were paid up
+// front, whatever they have left. What they can cover comes out of their
+// balance; the rest is taken as debt - their Money / Influence goes negative
+// (see effects.js's adjustBalance) and their next income pays it off. The
+// offerer is made whole immediately and the Scandal hit + Pecah Amanah mark
+// always apply; the offerer takes a smaller Scandal hit for being in on it.
+// Money is only moved, never created, so the economy stays closed.
 // reason codes: 'contract-not-found' | 'not-exposable'
 export function exposeContract(contractId, requesterId, players) {
   const c = contracts.find((x) => x.id === contractId);
@@ -349,9 +353,11 @@ export function exposeContract(contractId, requesterId, players) {
   const target = players.find((p) => p.id === c.targetId);
   if (!offerer || !target) return { ok: false, reason: 'contract-not-found' };
 
-  const refund = {
-    money: Math.min(c.upfront.money, Math.max(target.money, 0)),
-    influence: Math.min(c.upfront.influence, Math.max(target.influence, 0)),
+  const refund = { money: c.upfront.money, influence: c.upfront.influence };
+  // The part of the refund the target can no longer pay from what they hold.
+  const debt = {
+    money: Math.max(0, refund.money - Math.max(target.money, 0)),
+    influence: Math.max(0, refund.influence - Math.max(target.influence, 0)),
   };
   target.money -= refund.money;
   target.influence -= refund.influence;
@@ -363,7 +369,28 @@ export function exposeContract(contractId, requesterId, players) {
   target.betrayals = (target.betrayals || 0) + 1;
   c.status = 'exposed';
 
-  return { ok: true, contract: viewOf(c), refund, offerer, target };
+  return { ok: true, contract: viewOf(c), refund, debt, offerer, target };
+}
+
+// Pending offers the player has made and not yet had answered - their own
+// side only. (The target sees theirs as the incoming-deal prompt.)
+export function getPendingDealViewsFor(playerId) {
+  const views = [];
+  pendingDeals.forEach((d, dealId) => {
+    if (d.offererId !== playerId) return;
+    views.push({ dealId, targetId: d.targetId, money: d.money, influence: d.influence, condition: d.condition });
+  });
+  return views;
+}
+
+// Two players may talk privately while a deal between them is waiting for an
+// answer, and for as long as a contract between them exists (any status - a
+// broken one still has to be argued over before it is exposed).
+export function hasDealBetween(aId, bId) {
+  for (const d of pendingDeals.values()) {
+    if ((d.offererId === aId && d.targetId === bId) || (d.offererId === bId && d.targetId === aId)) return true;
+  }
+  return contracts.some((c) => (c.offererId === aId && c.targetId === bId) || (c.offererId === bId && c.targetId === aId));
 }
 
 export function resetDeals() {

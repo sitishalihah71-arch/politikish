@@ -23,6 +23,17 @@ export function applyApprovalDelta(player, delta) {
   player.approval = clamp(player.approval + delta, 0, 100);
 }
 
+// Money/Influence can go negative in exactly one way: a Dedahkan refund the
+// target can no longer cover is taken as debt (backroomDeals.js). Every other
+// effect that moves a balance must go through here so it neither pushes a
+// debtor deeper nor quietly wipes the debt: a loss never drops the balance
+// below max-of(0, what they already had), and a gain pays the debt down first.
+export function adjustBalance(player, key, delta) {
+  const current = player[key];
+  player[key] = Math.max(Math.min(current, 0), current + delta);
+  return player[key] - current;
+}
+
 // Positive delta = incoming scandal (reduced by active Public Support).
 // Negative delta = a reduction, applied directly with no interaction.
 export function applyScandalDelta(player, delta) {
@@ -48,7 +59,8 @@ export function tickPublicSupport(player) {
 export function applyScandalPenalty(player, players) {
   if (player.scandal < SCANDAL_PENALTY_THRESHOLD) return false;
 
-  player.money = Math.floor(player.money * (1 - SCANDAL_MONEY_LOSS_PERCENT / 100));
+  // Debt is not "money" to lose half of (halving a negative would forgive it).
+  if (player.money > 0) player.money = Math.floor(player.money * (1 - SCANDAL_MONEY_LOSS_PERCENT / 100));
   player.scandal = SCANDAL_PENALTY_RESET;
   applyApprovalDelta(player, -GAME_BALANCE.approvalRating.scandalPenaltyPenalty);
 

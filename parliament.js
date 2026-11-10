@@ -7,7 +7,7 @@
 // than the generic per-player effect loop.
 
 import { randomChoice } from './utils.js';
-import { applyScandalDelta } from './effects.js';
+import { applyScandalDelta, adjustBalance } from './effects.js';
 
 export const PARLIAMENT_MOTIONS = [
   {
@@ -80,8 +80,8 @@ export function applyMotion(motion, target, players) {
 
   const { effects } = motion;
   players.forEach((player) => {
-    if (effects.money) player.money = Math.max(0, player.money + effects.money);
-    if (effects.influence) player.influence = Math.max(0, player.influence + effects.influence);
+    if (effects.money) adjustBalance(player, 'money', effects.money);
+    if (effects.influence) adjustBalance(player, 'influence', effects.influence);
     if (effects.scandalDelta) applyScandalDelta(player, effects.scandalDelta);
     if (effects.publicSupportTurns) player.publicSupportTurns += effects.publicSupportTurns;
   });
