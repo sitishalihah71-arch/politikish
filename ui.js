@@ -1933,8 +1933,10 @@ const chatDrafts = new Map(); // otherId -> unsent text, survives list re-render
 const chatHistoryRequested = new Set();
 const chatOpen = new Set(); // otherIds whose panel the player has expanded
 let contractsSignature = '';
+let contractsTab = 'live'; // 'live' (Kontrak) | 'record' (Rekod: exposed contracts)
 
 function resetBackroomChatUi() {
+  contractsTab = 'live';
   chatThreads.clear();
   chatUnread.clear();
   chatDrafts.clear();
@@ -2128,6 +2130,7 @@ function isContractLive(contract) {
 // turn change would drop focus from a chat box mid-sentence.
 function contractsFingerprint(snapshot) {
   return JSON.stringify([
+    contractsTab,
     (snapshot.contracts || []).map((c) => [c.id, c.status]),
     (snapshot.pendingDeals || []).map((d) => d.dealId),
   ]);
@@ -2164,6 +2167,45 @@ function contractStatusNote(c, otherName) {
   return c.role === 'offerer' ? `Anda mendedahkan ${otherName}.` : `${otherName} mendedahkan anda.`;
 }
 
+// Rekod: contracts that were exposed. Read-only - no chat, no actions.
+function renderContractRecords(list, records, nameOf) {
+  if (!records.length) {
+    const empty = document.createElement('p');
+    empty.className = 'feed-empty';
+    empty.textContent = 'Belum ada kontrak yang didedahkan. Kontrak yang didedahkan disimpan di sini sebagai rekod.';
+    list.appendChild(empty);
+    return;
+  }
+  records.forEach((c) => {
+    const otherName = nameOf(c.role === 'offerer' ? c.targetId : c.offererId);
+    const card = document.createElement('div');
+    card.className = 'contract-card is-exposed is-record';
+    const head = document.createElement('div');
+    head.className = 'contract-head';
+    const who = document.createElement('strong');
+    who.textContent = c.role === 'offerer' ? `Anda → ${otherName}` : `${otherName} → Anda`;
+    const status = document.createElement('span');
+    status.className = 'contract-status';
+    status.textContent = CONTRACT_STATUS_LABELS.exposed;
+    head.append(who, status);
+
+    const pay = document.createElement('p');
+    pay.className = 'contract-pay';
+    pay.textContent = `${describePayment({ money: c.money, influence: c.influence })} · dibayar ${describePayment(c.upfront)} · ditahan ${describePayment(c.held)}`;
+    const terms = document.createElement('p');
+    terms.className = 'contract-terms';
+    terms.textContent = `Syarat: ${describeCondition(c.condition, nameOf)}`;
+    const note = document.createElement('p');
+    note.className = 'contract-note';
+    const refund = c.refund ? describePayment(c.refund) : 'RM0';
+    const debt = c.debt && (c.debt.money || c.debt.influence) ? ` (termasuk hutang ${describePayment(c.debt)})` : '';
+    const who2 = c.role === 'offerer' ? `Anda mendedahkan ${otherName}` : `${otherName} mendedahkan anda`;
+    note.textContent = `${who2} pada ronda ${c.exposedRound || '?'}. Dipulangkan ${refund}${debt}. Sembang ditutup.`;
+    card.append(head, pay, terms, note);
+    list.appendChild(card);
+  });
+}
+
 function renderContractsList(snapshot) {
   const list = $('#contracts-list');
   // Keep a half-typed message (and the keyboard) across a rebuild.
@@ -2174,11 +2216,30 @@ function renderContractsList(snapshot) {
   list.innerHTML = '';
   const nameOf = (id) => snapshot.players.find((p) => p.id === id)?.name || 'seorang pemain';
   const pending = snapshot.pendingDeals || [];
-  const contracts = [...(snapshot.contracts || [])].sort((a, b) => Number(isContractLive(b)) - Number(isContractLive(a)));
+  const all = snapshot.contracts || [];
+  // An exposed contract is over: it leaves Kontrak (and its chat is closed)
+  // and is kept in Rekod purely as a record.
+  const contracts = all.filter((c) => c.status !== 'exposed').sort((a, b) => Number(isContractLive(b)) - Number(isContractLive(a)));
+  const records = all.filter((c) => c.status === 'exposed').sort((a, b) => (b.exposedRound || 0) - (a.exposedRound || 0));
+
+  $$('.contracts-tab').forEach((tab) => {
+    const active = tab.dataset.tab === contractsTab;
+    tab.classList.toggle('is-active', active);
+    tab.setAttribute('aria-selected', String(active));
+  });
+  $('#tab-contracts-live-count').textContent = String(contracts.length + pending.length);
+  $('#tab-contracts-record-count').textContent = String(records.length);
+
+  if (contractsTab === 'record') {
+    renderContractRecords(list, records, nameOf);
+    return;
+  }
   if (!contracts.length && !pending.length) {
     const empty = document.createElement('p');
     empty.className = 'feed-empty';
-    empty.textContent = 'Tiada kontrak. Tawar Backroom Deal dengan syarat untuk membuatnya.';
+    empty.textContent = records.length
+      ? 'Tiada kontrak aktif. Kontrak yang sudah didedahkan ada di tab Rekod.'
+      : 'Tiada kontrak. Tawar Backroom Deal dengan syarat untuk membuatnya.';
     list.appendChild(empty);
     return;
   }
@@ -2330,6 +2391,14 @@ function wireMatchActions() {
     sound.playClick();
     renderContractsList(match.getMatchSnapshot());
     $('#contracts-modal').hidden = false;
+  });
+
+  $$('.contracts-tab').forEach((tab) => {
+    tab.addEventListener('click', () => {
+      sound.playClick();
+      contractsTab = tab.dataset.tab;
+      renderContractsList(match.getMatchSnapshot());
+    });
   });
 
   $('#btn-contracts-close').addEventListener('click', () => {
@@ -2545,8 +2614,8 @@ function wireMatchEvents() {
         ? `Kontrak dengan ${other} tamat — baki ${held} dipulangkan kepada anda.`
         : `Kontrak dengan ${other} tamat tanpa masalah — baki ${held} tidak dibayar.`,
       exposed: role === 'offerer'
-        ? `🗂️ Anda mendedahkan ${other}.`
-        : `🗂️ ${other} mendedahkan anda! +${GAME_BALANCE.backroomDeals.exposeTargetScandal}% Skandal dan tanda Pecah Amanah.`,
+        ? `🗂️ Anda mendedahkan ${other}. Kontrak dipindahkan ke Rekod dan sembang ditutup.`
+        : `🗂️ ${other} mendedahkan anda! +${GAME_BALANCE.backroomDeals.exposeTargetScandal}% Skandal dan tanda Pecah Amanah. Sembang ditutup.`,
     };
     showToast(messages[kind] || 'Kontrak dikemas kini.', 5500);
     if (kind === 'fulfilled') sound.playCoins(); else sound.playWarning();

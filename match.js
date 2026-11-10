@@ -842,7 +842,7 @@ function processContractEvents(events) {
 // "Dedahkan" - the one moment a contract goes public.
 function hostExposeContract(requesterId, contractId) {
   const players = room.getPlayersLive();
-  const result = exposeContract(contractId, requesterId, players);
+  const result = exposeContract(contractId, requesterId, players, { round: currentRound });
   if (!result.ok) return;
   const { offerer, target, refund, debt } = result;
   const refundParts = [];

@@ -230,6 +230,8 @@ function viewOf(c) {
     condition: c.condition,
     status: c.status,
     createdRound: c.createdRound,
+    // Only once exposed: the record of how it ended.
+    ...(c.status === 'exposed' ? { exposedRound: c.exposedRound, refund: c.refund, debt: c.debt } : {}),
   };
 }
 
@@ -345,7 +347,7 @@ export function noteTurnStart(activePlayer, players) {
 // always apply; the offerer takes a smaller Scandal hit for being in on it.
 // Money is only moved, never created, so the economy stays closed.
 // reason codes: 'contract-not-found' | 'not-exposable'
-export function exposeContract(contractId, requesterId, players) {
+export function exposeContract(contractId, requesterId, players, ctx = {}) {
   const c = contracts.find((x) => x.id === contractId);
   if (!c || c.offererId !== requesterId) return { ok: false, reason: 'contract-not-found' };
   if (c.status !== 'breached') return { ok: false, reason: 'not-exposable' };
@@ -368,6 +370,9 @@ export function exposeContract(contractId, requesterId, players) {
   applyScandalDelta(offerer, cfg.exposeOffererScandal);
   target.betrayals = (target.betrayals || 0) + 1;
   c.status = 'exposed';
+  c.exposedRound = ctx.round || c.createdRound;
+  c.refund = refund;
+  c.debt = debt;
 
   return { ok: true, contract: viewOf(c), refund, debt, offerer, target };
 }
@@ -384,13 +389,17 @@ export function getPendingDealViewsFor(playerId) {
 }
 
 // Two players may talk privately while a deal between them is waiting for an
-// answer, and for as long as a contract between them exists (any status - a
-// broken one still has to be argued over before it is exposed).
+// answer, and for as long as a contract between them is still open (any status
+// - a broken one still has to be argued over before it is exposed). Once a
+// contract is exposed it is over: the chat closes and the host refuses further
+// messages (the transcript stays in the host's record). Two players with
+// another open deal between them can still talk.
 export function hasDealBetween(aId, bId) {
   for (const d of pendingDeals.values()) {
     if ((d.offererId === aId && d.targetId === bId) || (d.offererId === bId && d.targetId === aId)) return true;
   }
-  return contracts.some((c) => (c.offererId === aId && c.targetId === bId) || (c.offererId === bId && c.targetId === aId));
+  return contracts.some((c) => c.status !== 'exposed'
+    && ((c.offererId === aId && c.targetId === bId) || (c.offererId === bId && c.targetId === aId)));
 }
 
 export function resetDeals() {

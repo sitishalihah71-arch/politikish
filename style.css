@@ -5808,3 +5808,60 @@ body[data-screen="lobby"] .global-corner-icons {
     border-top: 2px solid var(--ink);
   }
 }
+
+/* ---------- Kontrak / Rekod tabs ---------- */
+.contracts-tabs {
+  display: flex;
+  gap: 0;
+  margin-bottom: 10px;
+  border-bottom: 2px solid var(--ink);
+}
+
+.contracts-tab {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 44px;
+  padding: 6px 12px;
+  background: var(--paper-3);
+  border: 2px solid var(--ink);
+  border-bottom: 0;
+  border-radius: 0;
+  font: 700 16px var(--np-condensed);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  cursor: pointer;
+}
+
+.contracts-tab + .contracts-tab {
+  margin-left: -2px;
+}
+
+.contracts-tab b {
+  min-width: 20px;
+  padding: 1px 5px;
+  background: var(--ink-3);
+  color: var(--paper-2);
+  font: 700 13px var(--np-condensed);
+  text-align: center;
+}
+
+.contracts-tab.is-active {
+  background: var(--ink);
+  color: var(--paper-2);
+}
+
+.contracts-tab.is-active b {
+  background: var(--paper-2);
+  color: var(--ink);
+}
+
+.contract-card.is-record {
+  opacity: 1;
+  border-style: solid;
+  border-color: var(--ink-3);
+  background: var(--paper-3);
+}
