@@ -5865,3 +5865,129 @@ body[data-screen="lobby"] .global-corner-icons {
   border-color: var(--ink-3);
   background: var(--paper-3);
 }
+
+
+/* --- Character Expansion: Mode Watak (Phase 1) --- */
+
+.setting-row[hidden],
+.lobby-settings-events-badge[hidden] {
+  display: none;
+}
+
+.character-panel {
+  position: relative;
+  margin-top: 4px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  border: 1.5px dashed var(--ink);
+}
+
+.character-panel[hidden] {
+  display: none;
+}
+
+.character-panel h4 {
+  margin: 0;
+  font: 700 13px var(--np-condensed);
+  letter-spacing: 0.16em;
+  color: var(--ink-3);
+}
+
+.character-name {
+  font: 700 20px var(--np-condensed);
+  letter-spacing: 0.04em;
+}
+
+.character-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink-3);
+}
+
+.character-category {
+  padding: 1px 8px;
+  border: 1.5px solid var(--ink);
+  font: 700 12px var(--np-condensed);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink);
+}
+
+.character-details summary {
+  cursor: pointer;
+  font: 700 13px var(--np-condensed);
+  letter-spacing: 0.08em;
+  color: var(--ink-3);
+}
+
+.character-abilities {
+  margin: 8px 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.character-abilities dt {
+  font: 700 12px var(--np-condensed);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink-4);
+}
+
+.character-abilities dd {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.character-abilities dd b {
+  display: block;
+}
+
+.character-abilities dd .character-option {
+  display: block;
+  margin-top: 4px;
+  font-weight: 500;
+}
+
+.howto-character-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.howto-character {
+  padding: 10px 12px;
+  border: 1.5px solid var(--ink);
+}
+
+.howto-character-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+}
+
+.howto-character-head b {
+  font: 700 17px var(--np-condensed);
+  letter-spacing: 0.04em;
+}
+
+.howto-character-head span {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink-3);
+}
+
+.howto-character p {
+  margin: 4px 0 0;
+  font-size: 13px;
+  line-height: 1.35;
+}

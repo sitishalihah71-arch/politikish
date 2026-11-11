@@ -16,8 +16,21 @@ import { GAME_BALANCE } from './balance.js';
 import { getProjekReward } from './projects.js';
 import { buildActionStory } from './stories.js';
 import { describeCondition, getNextVoteRound, splitPayment } from './backroomDeals.js';
+import { CHARACTERS, CATEGORY_LABELS as CHARACTER_CATEGORY_LABELS, getCharacter } from './characters.js';
 
 let settings = loadSettings();
+
+// Mode Watak (Character Expansion) is built but not announced: its lobby
+// switch and the character list in How to Play stay hidden until it is
+// revealed in balance.js. A tester can reveal them early with ?watak in the URL.
+function isCharacterModeRevealed() {
+  if (GAME_BALANCE.room.charactersToggleVisible) return true;
+  try {
+    return new URLSearchParams(window.location.search).has('watak');
+  } catch {
+    return false;
+  }
+}
 let toastTimer = null;
 let draftAvatar = { hair: 0, face: 0 };
 
@@ -277,6 +290,9 @@ function renderLobby(snapshot) {
   const advancedBadge = $('#lobby-settings-advanced-badge');
   advancedBadge.textContent = `Advanced: ${snapshot.settings.advancedMode ? 'ON' : 'OFF'}`;
   advancedBadge.classList.toggle('is-on', Boolean(snapshot.settings.advancedMode));
+  const charactersBadge = $('#lobby-settings-characters-badge');
+  charactersBadge.hidden = !snapshot.settings.characters;
+  charactersBadge.classList.toggle('is-on', Boolean(snapshot.settings.characters));
 
   $('#lobby-count').textContent = `${snapshot.players.length} / ${snapshot.settings.maxPlayers}`;
 
@@ -370,6 +386,8 @@ function renderLobby(snapshot) {
     $('#setting-lobby-events').setAttribute('aria-checked', String(snapshot.settings.nationalEvents));
     $('#setting-lobby-parliament').setAttribute('aria-checked', String(snapshot.settings.parliamentVoting));
     $('#setting-lobby-advanced').setAttribute('aria-checked', String(Boolean(snapshot.settings.advancedMode)));
+    $('#setting-row-characters').hidden = !isCharacterModeRevealed();
+    $('#setting-lobby-characters').setAttribute('aria-checked', String(Boolean(snapshot.settings.characters)));
 
     const canStart = room.canStartMatch();
     const startBtn = $('#btn-lobby-start');
@@ -437,6 +455,11 @@ function wireLobbyScreen() {
   $('#setting-lobby-advanced').addEventListener('click', () => {
     const current = $('#setting-lobby-advanced').getAttribute('aria-checked') === 'true';
     room.updateSettings({ advancedMode: !current });
+  });
+
+  $('#setting-lobby-characters').addEventListener('click', () => {
+    const current = $('#setting-lobby-characters').getAttribute('aria-checked') === 'true';
+    room.updateSettings({ characters: !current });
   });
 }
 
@@ -917,6 +940,90 @@ function renderSecretObjective(localPlayer) {
   const completed = localPlayer.secretObjective.completed;
   statusEl.textContent = completed ? 'Selesai' : 'Belum selesai';
   statusEl.classList.toggle('is-complete', completed);
+}
+
+// The local player's own secret character. Like the secret objective, it only
+// ever exists on the local player's own entry (match.js's maskPlayersFor
+// strips it from everyone else's until the match ends).
+function makeAbilityRow(term, name, summary, options = []) {
+  const dt = document.createElement('dt');
+  dt.textContent = term;
+  const dd = document.createElement('dd');
+  const title = document.createElement('b');
+  title.textContent = name;
+  dd.appendChild(title);
+  dd.appendChild(document.createTextNode(summary));
+  options.forEach((option) => {
+    const line = document.createElement('span');
+    line.className = 'character-option';
+    line.textContent = `• ${option.name}${option.summary ? `: ${option.summary}` : ''}`;
+    dd.appendChild(line);
+  });
+  return [dt, dd];
+}
+
+let shownCharacterId = null;
+
+function renderCharacterPanel(localPlayer) {
+  const panel = $('#character-panel');
+  const character = localPlayer?.character ? getCharacter(localPlayer.character.id) : null;
+  if (!character) {
+    panel.hidden = true;
+    shownCharacterId = null;
+    return;
+  }
+  panel.hidden = false;
+  if (shownCharacterId === character.id) return; // nothing changes mid-match yet
+  shownCharacterId = character.id;
+
+  $('#character-name').textContent = character.name;
+  $('#character-category').textContent = CHARACTER_CATEGORY_LABELS[character.category];
+  $('#character-role').textContent = character.role;
+  const list = $('#character-abilities');
+  list.innerHTML = '';
+  const rows = [
+    makeAbilityRow('Special Ability', character.special.name, character.special.summary, character.special.options || []),
+    makeAbilityRow('Passive Ability', character.passive.name, character.passive.summary),
+    makeAbilityRow('Weakness', character.weakness.name, character.weakness.summary),
+  ];
+  rows.forEach(([dt, dd]) => {
+    list.appendChild(dt);
+    list.appendChild(dd);
+  });
+}
+
+function renderHowtoCharacters() {
+  const section = $('#howto-characters');
+  section.hidden = !isCharacterModeRevealed();
+  if (section.hidden) return;
+  const list = $('#howto-character-list');
+  list.innerHTML = '';
+  CHARACTERS.forEach((character) => {
+    const card = document.createElement('div');
+    card.className = 'howto-character';
+    const head = document.createElement('div');
+    head.className = 'howto-character-head';
+    const name = document.createElement('b');
+    name.textContent = character.name;
+    const meta = document.createElement('span');
+    meta.textContent = `${CHARACTER_CATEGORY_LABELS[character.category]} · ${character.role}`;
+    head.appendChild(name);
+    head.appendChild(meta);
+    card.appendChild(head);
+    [
+      ['Special', character.special],
+      ['Passive', character.passive],
+      ['Weakness', character.weakness],
+    ].forEach(([label, ability]) => {
+      const line = document.createElement('p');
+      const strong = document.createElement('b');
+      strong.textContent = `${label} - ${ability.name}: `;
+      line.appendChild(strong);
+      line.appendChild(document.createTextNode(ability.summary));
+      card.appendChild(line);
+    });
+    list.appendChild(card);
+  });
 }
 
 // Political Network progress and KABEL ownership only ever appear on the
@@ -1655,6 +1762,9 @@ function makeStatsGrid(player) {
     ['Media Used', String(player.stats.mediaCardsUsed)],
     ['Turns', String(player.stats.turnsPlayed)],
   ];
+  // Revealed to everyone once the match is over (null/absent when Mode Watak was off).
+  const revealed = player.character ? getCharacter(player.character.id) : null;
+  if (revealed) rows.push(['Character', revealed.name]);
   // Only ever present on the local player's own card - secretObjective is
   // masked out of everyone else's data (see match.js's maskPlayersFor).
   if (player.secretObjective) {
@@ -1926,6 +2036,7 @@ function renderMatchScreen(snapshot) {
   renderHierarchy(snapshot);
   renderActionPanel(snapshot);
   renderBottomBar(snapshot);
+  renderCharacterPanel(findLocalPlayer(snapshot));
   renderContractsChip(snapshot);
   handleActionFeedback(snapshot);
 
@@ -2685,6 +2796,7 @@ function wireSettingsModal() {
 // wireSettingsModal()'s open/close/backdrop/Escape pattern exactly.
 function wireHowtoModal() {
   const modal = $('#howto-modal');
+  renderHowtoCharacters();
 
   ['#btn-lobby-help', '#btn-menu-help'].forEach((selector) => {
     $(selector).addEventListener('click', () => {

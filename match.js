@@ -16,7 +16,8 @@
 import { bus, formatMoney } from './utils.js';
 import * as room from './room.js';
 import * as multiplayer from './multiplayer.js';
-import { RANKS, initMatchState } from './player.js';
+import { RANKS, initMatchState, stripPrivateFields } from './player.js';
+import { dealCharacters } from './characters.js';
 import { applyScandalPenalty, tickPublicSupport } from './effects.js';
 import { generateProjectOffers, resolveProjek } from './projects.js';
 import { generateMediaOffers, resolveMedia } from './media.js';
@@ -128,11 +129,14 @@ function getActivePlayer(players) {
 // that's the payload sent to a remote client or the snapshot the host
 // builds for its own local screen (both go through this same function, so
 // there's exactly one place the privacy rule can be gotten wrong).
+//
+// The same goes for a player's secret character and ability cooldowns (see
+// player.js's PRIVATE_PLAYER_FIELDS) - except that characters are revealed to
+// everyone once the match is over. Secret Objectives stay masked even then.
 function maskPlayersFor(players, viewerId) {
   return players.map((p) => {
     if (p.id === viewerId) return { ...p };
-    const { politicalNetwork, hasKabel, secretObjective, ...rest } = p;
-    return rest;
+    return stripPrivateFields(p, { keepCharacter: matchOver });
   });
 }
 
@@ -1233,6 +1237,9 @@ bus.on('room:match-started', () => {
       dealStartingAssets(players);
     }
     players.forEach(assignSecretObjective);
+    // Mode Watak: each player is dealt a distinct secret character. Skipped
+    // entirely when the setting is off, so the match is exactly as before.
+    if (roomSnap.settings.characters) dealCharacters(players);
     currentRound = 1;
     const bySlot = [...players].sort((a, b) => a.slot - b.slot);
     turnSlot = (bySlot.find((p) => p.connected) || bySlot[0]).slot;

@@ -43,6 +43,18 @@ export const GAME_BALANCE = {
     defaultNationalEvents: true,
     defaultParliamentVoting: true,
     defaultAdvancedMode: false,
+    // Character Expansion ("Mode Watak"). Off by default, and the lobby switch
+    // stays hidden until this is true (testers can reveal it early with the
+    // ?watak URL parameter). See characters.js.
+    defaultCharacters: false,
+    charactersToggleVisible: false,
+  },
+
+  // Character Expansion tunables (characters.js). `minPlayers` keeps a card
+  // out of the deck at small tables: the Opportunist picks from "characters
+  // in this match", which at 2-3 players would reveal the opponents outright.
+  characters: {
+    minPlayers: { opportunist: 4 },
   },
 
   // Seat capacity per rank is derived from the live player count (N) as

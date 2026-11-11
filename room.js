@@ -3,7 +3,7 @@
 // whatever this module broadcasts via `bus`.
 
 import { bus, generateRoomCode, saveSession, clearSession, randomChoice, randomInt } from './utils.js';
-import { createPlayer } from './player.js';
+import { createPlayer, stripPrivateFields } from './player.js';
 import { normalizeAvatar, HAIR_STYLES, FACE_STYLES } from './avatar.js';
 import { GAME_BALANCE } from './balance.js';
 import * as multiplayer from './multiplayer.js';
@@ -24,6 +24,7 @@ function defaultSettings() {
     nationalEvents: GAME_BALANCE.room.defaultNationalEvents,
     parliamentVoting: GAME_BALANCE.room.defaultParliamentVoting,
     advancedMode: GAME_BALANCE.room.defaultAdvancedMode,
+    characters: GAME_BALANCE.room.defaultCharacters,
   };
 }
 
@@ -74,8 +75,17 @@ function getRoomSnapshot() {
   };
 }
 
+// What may leave this device inside a room-level message. The live player
+// objects are shared with match.js, which hangs private match state on them
+// (secret objective, Kabel, Political Network, character...), so every room
+// message sends copies with those stripped - each player gets their own
+// private data only through match.js's personalised match-update.
+function networkPlayers() {
+  return players.map((p) => stripPrivateFields(p));
+}
+
 function broadcastRoomUpdate() {
-  multiplayer.send({ type: 'room-update', payload: { players: getRoomSnapshot().players, settings: gameSettings } });
+  multiplayer.send({ type: 'room-update', payload: { players: networkPlayers(), settings: gameSettings } });
 }
 
 function clearReconnectTimer(playerId) {
@@ -104,7 +114,7 @@ function handleJoinRequest(conn, rawName) {
     connectionsByPlayerId.set(existing.id, conn);
 
     multiplayer.send(
-      { type: 'join-accepted', payload: { playerId: existing.id, roomCode, players: getRoomSnapshot().players, settings: gameSettings } },
+      { type: 'join-accepted', payload: { playerId: existing.id, roomCode, players: networkPlayers(), settings: gameSettings } },
       conn,
     );
     broadcastRoomUpdate();
@@ -124,7 +134,7 @@ function handleJoinRequest(conn, rawName) {
   connectionsByPlayerId.set(player.id, conn);
 
   multiplayer.send(
-    { type: 'join-accepted', payload: { playerId: player.id, roomCode, players: getRoomSnapshot().players, settings: gameSettings } },
+    { type: 'join-accepted', payload: { playerId: player.id, roomCode, players: networkPlayers(), settings: gameSettings } },
     conn,
   );
   broadcastRoomUpdate();
@@ -297,6 +307,7 @@ export function updateSettings(partial) {
   if (typeof partial.nationalEvents === 'boolean') next.nationalEvents = partial.nationalEvents;
   if (typeof partial.parliamentVoting === 'boolean') next.parliamentVoting = partial.parliamentVoting;
   if (typeof partial.advancedMode === 'boolean') next.advancedMode = partial.advancedMode;
+  if (typeof partial.characters === 'boolean') next.characters = partial.characters;
   gameSettings = next;
   broadcastRoomUpdate();
   bus.emit('room:updated', getRoomSnapshot());
@@ -337,7 +348,7 @@ export function removeBot(botId) {
 
 export function startMatch() {
   if (role !== 'host' || !canStartMatch()) return false;
-  multiplayer.send({ type: 'match-start', payload: { players: getRoomSnapshot().players } });
+  multiplayer.send({ type: 'match-start', payload: { players: networkPlayers() } });
   bus.emit('room:match-started', getRoomSnapshot());
   return true;
 }

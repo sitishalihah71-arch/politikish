@@ -85,6 +85,26 @@ export function initMatchState(player) {
   // view exactly like politicalNetwork/hasKabel above (see match.js's
   // maskPlayersFor), and never relaxed even at match end.
   player.secretObjective = null;
+  // Character Expansion: dealt by characters.js's dealCharacters only when the
+  // room's "Mode Watak" is on, otherwise these stay empty. Both are private.
+  player.character = null; // { id } of the secret character
+  player.abilityState = {}; // per-ability { lastRound, count } for cooldowns / limits
+}
+
+// Fields no other player may ever see. match.js's maskPlayersFor strips them
+// from every personalised match payload, and room.js strips them from every
+// room-level message too (room-update / join-accepted / match-start), because
+// those carry copies of the same live player objects. A character is the one
+// exception: it is revealed to everyone once the match is over.
+export const PRIVATE_PLAYER_FIELDS = ['politicalNetwork', 'hasKabel', 'secretObjective', 'character', 'abilityState'];
+
+export function stripPrivateFields(player, { keepCharacter = false } = {}) {
+  const copy = { ...player };
+  PRIVATE_PLAYER_FIELDS.forEach((field) => {
+    if (keepCharacter && field === 'character') return;
+    delete copy[field];
+  });
+  return copy;
 }
 
 export function getNextRank(rank) {
