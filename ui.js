@@ -17,6 +17,7 @@ import { getProjekReward } from './projects.js';
 import { buildActionStory } from './stories.js';
 import { describeCondition, getNextVoteRound, splitPayment } from './backroomDeals.js';
 import { CHARACTERS, CATEGORY_LABELS as CHARACTER_CATEGORY_LABELS, getCharacter } from './characters.js';
+import { initCharacterReveal, getCardArt } from './characterReveal.js';
 
 let settings = loadSettings();
 
@@ -977,6 +978,10 @@ function renderCharacterPanel(localPlayer) {
   shownCharacterId = character.id;
 
   $('#character-name').textContent = character.name;
+  const thumb = $('#character-thumb');
+  const art = getCardArt(character.id);
+  thumb.hidden = !art;
+  if (art) thumb.src = art;
   $('#character-category').textContent = CHARACTER_CATEGORY_LABELS[character.category];
   $('#character-role').textContent = character.role;
   const list = $('#character-abilities');
@@ -2834,6 +2839,7 @@ export function initUI() {
   wireMatchActions();
   wireStoryHold();
   wireMatchEvents();
+  initCharacterReveal();
   applySoundUI();
   sound.applySoundSettings(settings);
   bus.on('settings:changed', (e) => sound.applySoundSettings(e.detail));

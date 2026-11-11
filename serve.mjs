@@ -5,7 +5,7 @@ import url from 'node:url';
 
 const ROOT = path.dirname(url.fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT) || 8843;
-const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json' };
+const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.webp': 'image/webp' };
 
 http.createServer((req, res) => {
   const reqPath = decodeURIComponent(req.url.split('?')[0]);

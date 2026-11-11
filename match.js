@@ -104,6 +104,18 @@ let marketStock = [];
 let passivePayout = null;
 let passiveSeq = 0;
 
+// Mode Watak reveal gate. While it is open nobody can take a turn and no bot
+// moves: every human is looking at their character card. It only ever exists
+// on the host (a client just mirrors the public `characterReveal` view), and
+// only when the setting is on and at least one human is connected, so a bots-
+// only match - and every match with Mode Watak off - never sees it.
+let revealGate = null; // host: { waiting: Set<playerId>, timer }
+let clientRevealGate = null; // clients: { waitingIds } as last broadcast
+
+function revealGateView() {
+  return revealGate ? { waitingIds: [...revealGate.waiting] } : null;
+}
+
 // Backroom contracts are private: the host keeps the registry (backroomDeals.js),
 // each client only ever receives its own, riding on its personalised
 // match-update payload.
@@ -163,6 +175,7 @@ export function getMatchSnapshot() {
     advancedMode,
     marketStock: [...marketStock],
     passivePayout,
+    characterReveal: isHostRole() ? revealGateView() : clientRevealGate,
     contracts: isHostRole() ? getContractViewsFor(roomSnap.localPlayerId) : clientContracts,
     pendingDeals: isHostRole() ? getPendingDealViewsFor(roomSnap.localPlayerId) : clientPendingDeals,
   };
@@ -184,6 +197,7 @@ function buildBroadcastPayloadFor(viewerId) {
     advancedMode,
     marketStock: [...marketStock],
     passivePayout,
+    characterReveal: revealGateView(),
     contracts: getContractViewsFor(viewerId),
     pendingDeals: getPendingDealViewsFor(viewerId),
   };
@@ -536,7 +550,7 @@ function resolveBotTurn(botId) {
 // goes for a turn that is being auto-skipped: it is nominally someone's
 // turn, but they must not be able to act on it.
 function isActivePlayerId(playerId) {
-  if (pendingVote || turnSkipping) return false;
+  if (pendingVote || turnSkipping || revealGate) return false;
   const active = getActivePlayer(room.getPlayersLive());
   return active && active.id === playerId;
 }
@@ -968,6 +982,8 @@ function handleHostMatchMessage(type, payload, conn) {
   } else if (type === 'market-choice') {
     if (!isFromConn(conn)) return;
     hostResolveMarketPurchase(conn.peer, payload?.assetType, respond);
+  } else if (type === 'character-ready') {
+    hostConfirmReveal(conn.peer);
   } else if (type === 'deal-propose') {
     // Not turn-gated - any connected player can propose a bribe at any time.
     hostProposeDeal(conn.peer, payload?.targetId, payload?.money || 0, payload?.influence || 0, payload?.condition, respond);
@@ -987,6 +1003,41 @@ function handleHostMatchMessage(type, payload, conn) {
 
 function isFromConn(conn) {
   return isActivePlayerId(conn.peer);
+}
+
+// ---------- Mode Watak reveal gate ----------
+
+// Opens the gate for every connected human. Returns false (and opens nothing)
+// when there is nobody to wait for.
+function openRevealGate(players) {
+  const waiting = new Set(players.filter((p) => p.connected && !p.isBot).map((p) => p.id));
+  if (waiting.size === 0) return false;
+  revealGate = { waiting, timer: setTimeout(closeRevealGate, GAME_BALANCE.characters.revealTimeoutMs) };
+  return true;
+}
+
+// Releases the table: clients are told, and the first turn finally starts
+// (a bot's, if a bot is up first).
+function closeRevealGate() {
+  if (!revealGate) return;
+  clearTimeout(revealGate.timer);
+  revealGate = null;
+  broadcastMatchUpdate();
+  maybeTriggerBotTurn(getActivePlayer(room.getPlayersLive()));
+}
+
+function hostConfirmReveal(playerId) {
+  if (!revealGate || !revealGate.waiting.has(playerId)) return;
+  revealGate.waiting.delete(playerId);
+  if (revealGate.waiting.size === 0) closeRevealGate();
+  else broadcastMatchUpdate();
+}
+
+// The local player has read their card ("Saya faham").
+export function confirmCharacterReveal() {
+  if (!matchStarted) return;
+  if (isHostRole()) hostConfirmReveal(room.getRoomSnapshot().localPlayerId);
+  else multiplayer.send({ type: 'character-ready', payload: {} });
 }
 
 // ---------- Client-side message handling ----------
@@ -1009,6 +1060,7 @@ function handleClientMatchMessage(type, payload) {
     advancedMode = Boolean(payload.advancedMode);
     marketStock = payload.marketStock || [];
     passivePayout = payload.passivePayout || null;
+    clientRevealGate = payload.characterReveal || null;
     clientContracts = payload.contracts || [];
     clientPendingDeals = payload.pendingDeals || [];
     bus.emit('match:updated', getMatchSnapshot());
@@ -1197,7 +1249,7 @@ export function castVote(choice) {
 // connected but has stepped away, which the automatic disconnect-skip in
 // advanceTurn() can't detect on its own.
 export function skipCurrentPlayer() {
-  if (!isHostRole() || !matchStarted || matchOver) return;
+  if (!isHostRole() || !matchStarted || matchOver || revealGate) return;
   const active = getActivePlayer(room.getPlayersLive());
   if (!active) return;
   setLastAction({ type: 'skip', actorId: active.id });
@@ -1244,8 +1296,10 @@ bus.on('room:match-started', () => {
     const bySlot = [...players].sort((a, b) => a.slot - b.slot);
     turnSlot = (bySlot.find((p) => p.connected) || bySlot[0]).slot;
     multiplayer.onMessage(handleHostMatchMessage);
+    // Mode Watak: hold the first turn until every human has seen their card.
+    const gated = Boolean(roomSnap.settings.characters) && openRevealGate(players);
     broadcastMatchUpdate();
-    maybeTriggerBotTurn(getActivePlayer(players));
+    if (!gated) maybeTriggerBotTurn(getActivePlayer(players));
   } else {
     multiplayer.onMessage(handleClientMatchMessage);
   }
@@ -1263,6 +1317,12 @@ bus.on('room:left', () => resetMatch());
 bus.on('room:updated', () => {
   if (!matchStarted || matchOver || !isHostRole()) return;
   const players = room.getPlayersLive();
+  if (revealGate) {
+    // Nobody is held up by someone who has left.
+    players.forEach((p) => { if (!p.connected) revealGate.waiting.delete(p.id); });
+    if (revealGate.waiting.size === 0) closeRevealGate();
+    else { broadcastMatchUpdate(); return; }
+  }
   const active = getActivePlayer(players);
   if (active && !active.connected && !pendingVote) {
     advanceTurn();
@@ -1288,6 +1348,9 @@ export function resetMatch() {
   advancedMode = false;
   marketStock = [];
   passivePayout = null;
+  clearTimeout(revealGate?.timer);
+  revealGate = null;
+  clientRevealGate = null;
   clearTimeout(voteTimer);
   voteTimer = null;
   resetDeals();

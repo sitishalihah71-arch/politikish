@@ -55,6 +55,13 @@ export const GAME_BALANCE = {
   // in this match", which at 2-3 players would reveal the opponents outright.
   characters: {
     minPlayers: { opportunist: 4 },
+    // Reveal ceremony: at match start every human sees their card (suspense,
+    // flip, rules) and the first turn waits until all of them confirmed. The
+    // host releases the table after `revealTimeoutMs` even if someone has not,
+    // so one idle player can never stall a match. Phase lengths are the
+    // client-side suspense pacing (see characterReveal.js).
+    revealTimeoutMs: 60000,
+    reveal: { curtainMs: 2400, riseMs: 1400, shakeMs: 2800, flipMs: 1300 },
   },
 
   // Seat capacity per rank is derived from the live player count (N) as
