@@ -6961,3 +6961,195 @@ body.cr-open {
     transition-duration: 0.01s !important;
   }
 }
+
+/* ---------- Mode Watak: powers, notices, public strip (characterUi.js) ----------
+   Same newspaper language as the rest of the match screen. */
+.mtag-revealed { background: var(--np-purple); color: var(--paper-3); }
+.mtag-endorsed { border: 1px solid var(--np-green); color: var(--np-green); }
+
+.character-subhead {
+  margin: 6px 0 2px;
+  font: 700 12px var(--np-condensed);
+  letter-spacing: 0.16em;
+  color: var(--ink-4);
+}
+
+.character-powers {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.power-copy {
+  margin: 0;
+  padding: 6px 8px;
+  border-left: 3px solid var(--np-purple);
+  background: var(--paper-2);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.power-btn {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 10px;
+  text-align: left;
+  background: var(--paper-3);
+  color: var(--ink);
+  border: 2px solid var(--ink);
+  border-radius: 0;
+  box-shadow: 3px 3px 0 var(--ink);
+  cursor: pointer;
+  transition: transform 0.1s ease, box-shadow 0.1s ease, background 0.1s ease;
+}
+
+.power-btn:hover:not(:disabled) {
+  transform: translate(-1px, -1px);
+  box-shadow: 4px 4px 0 var(--ink);
+  background: #f1e08a;
+}
+
+.power-btn:active:not(:disabled) {
+  transform: translate(2px, 2px);
+  box-shadow: 1px 1px 0 var(--ink);
+}
+
+.power-btn.is-off,
+.power-btn:disabled {
+  cursor: default;
+  box-shadow: none;
+  border-style: dashed;
+  background: var(--paper-2);
+  color: var(--ink-4);
+}
+
+.power-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.power-text b {
+  font: 700 16px var(--np-condensed);
+  letter-spacing: 0.04em;
+}
+
+.power-text small {
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.3;
+}
+
+.power-status {
+  flex: none;
+  max-width: 42%;
+  text-align: right;
+  font: 700 12px var(--np-condensed);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.character-journal {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 180px;
+  overflow-y: auto;
+}
+
+.journal-entry {
+  display: flex;
+  flex-direction: column;
+  padding: 5px 8px;
+  border-left: 3px solid var(--rule);
+  font-size: 12.5px;
+  line-height: 1.35;
+}
+
+.journal-entry b {
+  font: 700 13px var(--np-condensed);
+  letter-spacing: 0.06em;
+}
+
+.shadow-banner {
+  flex: none;
+  padding: 8px 14px;
+  background: var(--paper-3);
+  border: 1.5px solid var(--ink);
+  border-left: 6px solid var(--np-red);
+}
+
+.shadow-banner[hidden] { display: none; }
+
+.shadow-kicker {
+  font: 700 11px var(--np-condensed);
+  letter-spacing: 0.2em;
+  color: var(--np-red);
+}
+
+.shadow-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 10px;
+  margin-top: 2px;
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.shadow-line b {
+  font: 700 17px var(--np-condensed);
+  letter-spacing: 0.04em;
+}
+
+.power-card { max-width: 480px; }
+.power-note { margin: 0 0 8px; }
+.power-amount { font: 800 26px var(--np-display); text-align: center; margin: 6px 0; }
+.power-card input[type="range"] { width: 100%; margin-bottom: 12px; }
+
+.power-choice .power-choice-text {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  text-align: left;
+}
+
+.power-choice .power-choice-text b { font: 800 17px/1.2 var(--np-display); }
+.power-choice .power-choice-text small { font: 600 13px/1.3 var(--np-condensed); letter-spacing: 0.03em; color: var(--ink-3); }
+
+.power-clues {
+  margin: 0 0 8px;
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 4px 12px;
+}
+
+.power-clues dt { font: 700 13px var(--np-condensed); letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-4); }
+.power-clues dd { margin: 0; font-size: 15px; font-weight: 700; }
+
+.deal-expose-btn,
+.bonus-vote-btn { width: 100%; margin: 8px 0 0; }
+.deal-expose-btn[hidden],
+.bonus-vote-btn[hidden] { display: none; }
+
+.howto-rules { margin: 8px 0 0; padding-left: 18px; display: flex; flex-direction: column; gap: 6px; font-size: 13.5px; line-height: 1.4; }
+.howto-sub { margin: 14px 0 0; font: 700 16px var(--np-condensed); letter-spacing: 0.08em; text-transform: uppercase; }
+.match-end-character { display: block; font: 600 13px var(--np-condensed); color: var(--ink-3); letter-spacing: 0.04em; }
+
+/* Mode Watak adds a fifth cell to the phone stat strip; tighten it so "RM10,000" fits. */
+@media (max-width: 480px) {
+  .match-bottom-bar:has(#bottom-trust-wrap:not([hidden])) .bottom-stat-label {
+    font-size: 9px;
+    letter-spacing: 0.02em;
+  }
+  .match-bottom-bar:has(#bottom-trust-wrap:not([hidden])) .bottom-stat-value {
+    font-size: 13px;
+  }
+  .match-bottom-bar:has(#bottom-trust-wrap:not([hidden])) #bottom-rank {
+    font-size: 11px;
+  }
+}

@@ -18,6 +18,7 @@ import { buildActionStory } from './stories.js';
 import { describeCondition, getNextVoteRound, splitPayment } from './backroomDeals.js';
 import { CHARACTERS, CATEGORY_LABELS as CHARACTER_CATEGORY_LABELS, getCharacter } from './characters.js';
 import { initCharacterReveal, getCardArt } from './characterReveal.js';
+import { initCharacterUi, renderCharacterUi, publicCharacterTag, endScreenCharacterLine } from './characterUi.js';
 
 let settings = loadSettings();
 
@@ -537,6 +538,7 @@ let voteCountdownInterval = null;
 let wasMyTurn = false;
 let currentAttempt = null; // { targetId, assetId } of the Political Raid being set up
 let currentDealTargetId = null;
+let currentDealSpecial = null; // 'fixer' | 'funding' | null: a character special deal
 let currentIncomingDeal = null; // { dealId, fromId, fromName, money, influence }
 
 function makeCardLine(text, positive) {
@@ -585,6 +587,17 @@ function renderMatchPlayerList(snapshot) {
       if (player.betrayals) {
         const tag = makeTag(player.betrayals > 1 ? `KHIANAT ×${player.betrayals}` : 'KHIANAT', 'mtag-betray');
         tag.title = `Pecah Amanah — didedahkan memungkiri perjanjian sulit (${player.betrayals}×)`;
+        name.appendChild(tag);
+      }
+      const revealedAs = publicCharacterTag(player);
+      if (revealedAs) {
+        const tag = makeTag(revealedAs.toUpperCase(), 'mtag-revealed');
+        tag.title = 'Identiti terbongkar dalam Perbicaraan Media';
+        name.appendChild(tag);
+      }
+      if ((snapshot.shadow?.endorsements || []).some((en) => en.targetId === player.id)) {
+        const tag = makeTag('DISOKONG', 'mtag-endorsed');
+        tag.title = 'Mendapat sokongan rasmi Penentu Raja';
         name.appendChild(tag);
       }
       appendPublicSupportBadge(name, player);
@@ -983,7 +996,8 @@ let shownCharacterId = null;
 
 function renderCharacterPanel(localPlayer) {
   const panel = $('#character-panel');
-  const character = localPlayer?.character ? getCharacter(localPlayer.character.id) : null;
+  // An Opportunist who has copied someone IS that character from then on.
+  const character = localPlayer?.character ? getCharacter(localPlayer.character.copiedId || localPlayer.character.id) : null;
   if (!character) {
     panel.hidden = true;
     shownCharacterId = null;
@@ -1301,7 +1315,7 @@ function openTargetPicker(context) {
         listEl.appendChild(makeTargetPickerRow(player, player.name, () => {
           sound.playClick();
           $('#target-picker-modal').hidden = true;
-          openDealOfferModal(player);
+          openDealOfferModal(player, context.special || null);
         }));
       });
     $('#target-picker-modal').hidden = false;
@@ -1345,12 +1359,16 @@ function openTargetPicker(context) {
 // Composing an offer never touches match.js/the network until Send is
 // clicked - the slider max is just this player's own current holdings, so
 // they physically can't compose an offer they can't afford.
-function openDealOfferModal(target) {
+function openDealOfferModal(target, special = null) {
   currentDealTargetId = target.id;
+  currentDealSpecial = special;
   const snapshot = match.getMatchSnapshot();
   const localPlayer = findLocalPlayer(snapshot);
 
-  $('#deal-offer-target-line').textContent = `Offer to: ${target.name}`;
+  const specialNote = special === 'fixer'
+    ? ' (Fixer Deal: anda hanya +5% Skandal dan dapat +10% ganjaran)'
+    : special === 'funding' ? ' (Secret Funding: anda dapat +30% jika penerima ialah pemain Dirty Politics)' : '';
+  $('#deal-offer-target-line').textContent = `Offer to: ${target.name}${specialNote}`;
 
   const moneySlider = $('#deal-offer-money-slider');
   moneySlider.min = '0';
@@ -1861,6 +1879,13 @@ function renderMatchEnd(snapshot) {
       name.className = 'lobby-player-name';
       name.textContent = p.name;
       info.appendChild(name);
+      const characterLine = endScreenCharacterLine(p);
+      if (characterLine) {
+        const sub = document.createElement('span');
+        sub.className = 'lobby-player-sub match-end-character';
+        sub.textContent = `Watak: ${characterLine}`;
+        info.appendChild(sub);
+      }
       header.appendChild(info);
 
       const badge = document.createElement('span');
@@ -2060,6 +2085,7 @@ function renderMatchScreen(snapshot) {
   renderActionPanel(snapshot);
   renderBottomBar(snapshot);
   renderCharacterPanel(findLocalPlayer(snapshot));
+  renderCharacterUi(snapshot);
   renderContractsChip(snapshot);
   handleActionFeedback(snapshot);
 
@@ -2598,7 +2624,7 @@ function wireMatchActions() {
     sound.playClick();
     const snapshot = match.getMatchSnapshot();
     const condition = readDealCondition(snapshot, findLocalPlayer(snapshot));
-    match.proposeBackroomDeal(currentDealTargetId, money, influence, condition);
+    match.proposeBackroomDeal(currentDealTargetId, money, influence, condition, currentDealSpecial);
     $('#deal-offer-modal').hidden = true;
     showToast('Offer sent secretly.');
   });
@@ -2608,6 +2634,14 @@ function wireMatchActions() {
     $('#deal-incoming-overlay').hidden = true;
     $('#deal-incoming-chat').innerHTML = '';
     if (currentIncomingDeal) match.respondToBackroomDeal(currentIncomingDeal.dealId, true);
+    currentIncomingDeal = null;
+  });
+
+  $('#btn-deal-expose').addEventListener('click', () => {
+    sound.playClick();
+    $('#deal-incoming-overlay').hidden = true;
+    $('#deal-incoming-chat').innerHTML = '';
+    if (currentIncomingDeal) match.exposeBackroomOffer(currentIncomingDeal.dealId);
     currentIncomingDeal = null;
   });
 
@@ -2673,6 +2707,11 @@ function wireMatchActions() {
 }
 
 function wireMatchEvents() {
+  initCharacterUi({
+    showToast,
+    pushFeed,
+    openDeal: (special) => openTargetPicker({ mode: 'deal', special }),
+  });
   bus.on('match:updated', (e) => renderMatchScreen(e.detail));
   bus.on('match:offers', (e) => {
     // A slow network response can arrive after the turn has already moved
@@ -2714,6 +2753,7 @@ function wireMatchEvents() {
     const panel = buildChatPanel(e.detail.fromId);
     mount.appendChild(panel);
     if ((chatUnread.get(e.detail.fromId) || 0) > 0) setChatPanelOpen(panel, true);
+    $('#btn-deal-expose').hidden = !e.detail.canExpose; // only the Clean Politician is offered this
     $('#deal-incoming-overlay').hidden = false;
     sound.playWarning();
   });
