@@ -86,3 +86,39 @@ export function countAtRank(players, rank) {
 export function hasOpenSeat(players, rank) {
   return countAtRank(players, rank) < getSeatCapacity(players.length)[rank];
 }
+
+// ---------- Turn-skip counter ----------
+// `skipNextTurn` started life as a boolean (a leaked bribe benches you once).
+// It is now a counter so one incident can bench a player for several turns
+// (Shadow Politics: the Clean Politician skips 2). `true` still means 1, and
+// an empty counter is stored as `false`, exactly like before.
+export function addSkipTurns(player, turns, reason = null) {
+  if (!(turns > 0)) return 0;
+  const cap = GAME_BALANCE.shadowPolitics.maxSkipTurns;
+  const total = Math.min(cap, (Number(player.skipNextTurn) || 0) + turns);
+  player.skipNextTurn = total > 0 ? total : false;
+  if (reason) player.skipReason = reason;
+  return total;
+}
+
+// Uses up one pending skip. Returns the reason to announce.
+export function consumeSkipTurn(player) {
+  const left = (Number(player.skipNextTurn) || 0) - 1;
+  const reason = player.skipReason || 'bribery-leak';
+  player.skipNextTurn = left > 0 ? left : false;
+  if (!player.skipNextTurn) delete player.skipReason;
+  return reason;
+}
+
+// ---------- Corruption (Shadow Politics) ----------
+// Corruption Points are the Scandal meter. Gains from deals are reduced by
+// active Public Support like any other Scandal and stop at the cap, so they
+// never trigger the 100% penalty by themselves. Returns what was actually added.
+export function addCorruption(player, amount) {
+  const before = player.scandal;
+  applyScandalDelta(player, amount);
+  const cap = GAME_BALANCE.shadowPolitics.corruptionCap;
+  // Never above the cap, and never pulling down someone who already sits above it.
+  player.scandal = Math.min(player.scandal, Math.max(before, cap));
+  return player.scandal - before;
+}

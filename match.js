@@ -18,7 +18,7 @@ import * as room from './room.js';
 import * as multiplayer from './multiplayer.js';
 import { RANKS, initMatchState, stripPrivateFields } from './player.js';
 import { dealCharacters } from './characters.js';
-import { applyScandalPenalty, tickPublicSupport } from './effects.js';
+import { applyScandalPenalty, tickPublicSupport, consumeSkipTurn } from './effects.js';
 import { generateProjectOffers, resolveProjek } from './projects.js';
 import { generateMediaOffers, resolveMedia } from './media.js';
 import { resolvePolitik } from './politics.js';
@@ -42,6 +42,7 @@ let currentRound = 1;
 let maxRounds = GAME_BALANCE.room.defaultRounds; // captured from room settings at match start
 let turnSlot = 1;
 let matchOver = false;
+let charactersMode = false; // Mode Watak, captured at match start (host)
 let winnerId = null;
 let clientPlayers = []; // client-side cache; irrelevant on host (uses room.getPlayersLive())
 let lastAction = null; // descriptor of the most recently resolved action, for toasts/sound cues
@@ -236,6 +237,8 @@ function determineWinner(players) {
     const rankDiff = RANKS.indexOf(b.rank) - RANKS.indexOf(a.rank);
     if (rankDiff !== 0) return rankDiff;
     if (a.scandal !== b.scandal) return a.scandal - b.scandal;
+    // Mode Watak: Public Trust settles a tie on rank and Scandal.
+    if (charactersMode && a.approval !== b.approval) return b.approval - a.approval;
     return a.slot - b.slot;
   });
   return sorted[0] ? sorted[0].id : null;
@@ -476,12 +479,12 @@ function settleTurnState() {
   const newActive = getActivePlayer(room.getPlayersLive());
   if (newActive) contractsNoteTurnStart(newActive, room.getPlayersLive());
   if (newActive && newActive.skipNextTurn) {
-    newActive.skipNextTurn = false;
+    const skipReason = consumeSkipTurn(newActive);
     turnSkipping = true;
     // The move that just resolved gets broadcast first - otherwise the skip
     // notice would overwrite it as `lastAction` before anyone ever saw it.
     broadcastMatchUpdate();
-    setLastAction({ type: 'skip', actorId: newActive.id, reason: 'bribery-leak' });
+    setLastAction({ type: 'skip', actorId: newActive.id, reason: skipReason });
     broadcastMatchUpdate();
     const skippedSlot = turnSlot;
     // Re-checked on firing: a disconnect (or anything else) may already have
@@ -621,7 +624,7 @@ function hostResolvePolitik(playerId, extraInfluence, respond) {
   const players = room.getPlayersLive();
   const player = players.find((p) => p.id === playerId);
   if (!player) return;
-  const result = resolvePolitik(player, players, extraInfluence);
+  const result = resolvePolitik(player, players, extraInfluence, Math.random, { trust: charactersMode });
   if (!result.ok) {
     respond({ type: 'action-rejected', payload: { reason: result.reason } });
     return;
@@ -792,6 +795,7 @@ function dealContext() {
     maxRounds,
     voteSeq,
     parliamentEnabled: Boolean(room.getRoomSnapshot().settings.parliamentVoting),
+    characters: charactersMode, // Mode Watak: accepted deals cost Corruption and leave an Evidence Token
   };
 }
 
@@ -1277,6 +1281,7 @@ bus.on('room:match-started', () => {
   const roomSnap = room.getRoomSnapshot();
   maxRounds = roomSnap.settings.rounds;
   advancedMode = Boolean(roomSnap.settings.advancedMode);
+  charactersMode = Boolean(roomSnap.settings.characters);
   marketStock = [];
 
   if (isHostRole()) {
@@ -1346,6 +1351,7 @@ export function resetMatch() {
   pendingVote = null;
   turnSkipping = false;
   advancedMode = false;
+  charactersMode = false;
   marketStock = [];
   passivePayout = null;
   clearTimeout(revealGate?.timer);

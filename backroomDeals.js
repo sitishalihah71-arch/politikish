@@ -21,6 +21,7 @@ import { GAME_BALANCE } from './balance.js';
 import { RANK_LABELS, getNextRank } from './player.js';
 import { validateSabotaj } from './sabotage.js';
 import { applyScandalDelta, demoteOneRank } from './effects.js';
+import { recordAcceptedDeal, applyExposedBeforeAccept, markContractExposed, resetEvidence } from './evidence.js';
 
 const cfg = GAME_BALANCE.backroomDeals;
 
@@ -199,7 +200,17 @@ export function respondToDeal(dealId, accept, players, ctx = {}, rng = Math.rand
   target.money += upfront.money;
   target.influence += upfront.influence;
 
-  if (!conditional) return { ...base, leaked: false };
+  // Mode Watak (ctx.characters): an accepted deal costs Corruption and Public
+  // Trust and leaves one Evidence Token (evidence.js). Off: nothing changes.
+  const dealType = deal.condition.type === 'none' ? 'plain' : deal.condition.type;
+  const record = (contractId = null) => (ctx.characters
+    ? recordAcceptedDeal({ initiator: offerer, recipient: target, dealType, money: deal.money, influence: deal.influence, round: ctx.round || 1, contractId })
+    : null);
+
+  if (!conditional) {
+    const shadow = record();
+    return { ...base, leaked: false, ...(shadow ? { corruption: shadow.corruption } : {}) };
+  }
 
   contractSeq += 1;
   const contract = {
@@ -218,7 +229,8 @@ export function respondToDeal(dealId, accept, players, ctx = {}, rng = Math.rand
     botWillBreak: Boolean(target.isBot) && rng() * 100 < cfg.botBreakChance,
   };
   contracts.push(contract);
-  return { ...base, leaked: false, contract: viewOf(contract), contractId: contract.id, upfront, held };
+  const shadow = record(contract.id);
+  return { ...base, leaked: false, contract: viewOf(contract), contractId: contract.id, upfront, held, ...(shadow ? { corruption: shadow.corruption } : {}) };
 }
 
 // ---------- Contract lifecycle ----------
@@ -391,11 +403,27 @@ export function exposeContract(contractId, requesterId, players, ctx = {}) {
   target.betrayals = (target.betrayals || 0) + 1;
   c.status = 'exposed';
   c.exposedRound = ctx.round || c.createdRound;
+  markContractExposed(c.id, c.exposedRound); // the same deal cannot be exposed again through its token
   c.refund = refund;
   c.debt = debt;
   c.penalty = { target: { ...targetFine, ranksLost }, offerer: offererFine };
 
   return { ok: true, contract: viewOf(c), refund, debt, penalty: c.penalty, offerer, target };
+}
+
+// Mode Watak: the person a deal was offered to exposes it instead of
+// answering (the Clean Politician's special, wired up later). Only the
+// recipient may, and only while it is still unanswered; nothing was paid, so
+// there is no token. Penalties come from evidence.js's single table.
+// reason codes: 'deal-not-found'
+export function exposePendingDeal(dealId, exposerId, players) {
+  const deal = pendingDeals.get(dealId);
+  if (!deal || deal.targetId !== exposerId) return { ok: false, reason: 'deal-not-found' };
+  const offerer = players.find((p) => p.id === deal.offererId);
+  const target = players.find((p) => p.id === deal.targetId);
+  pendingDeals.delete(dealId);
+  if (!offerer || !target) return { ok: false, reason: 'deal-not-found' };
+  return { ok: true, offerer, target, ...applyExposedBeforeAccept(offerer, target) };
 }
 
 // Pending offers the player has made and not yet had answered - their own
@@ -426,4 +454,5 @@ export function hasDealBetween(aId, bId) {
 export function resetDeals() {
   pendingDeals.clear();
   contracts = [];
+  resetEvidence();
 }

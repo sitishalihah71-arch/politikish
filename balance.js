@@ -64,6 +64,40 @@ export const GAME_BALANCE = {
     reveal: { curtainMs: 2400, riseMs: 1400, shakeMs: 2800, flipMs: 1300 },
   },
 
+  // Shadow Politics (Mode Watak only; evidence.js). Corruption Points are the
+  // existing Scandal meter and Public Trust is the existing Approval Rating, so
+  // these are deltas on those. `consequences` is THE one authoritative penalty
+  // table for an exposed Backroom Deal (GDD section 5): every figure lives here
+  // and each penalty is applied once per incident. The separate "Dedahkan"
+  // contract penalties (backroomDeals above) are a different incident and are
+  // untouched. Money losses never push anyone below zero (adjustBalance).
+  shadowPolitics: {
+    corruptionPerAcceptedDeal: 20, // initiator and recipient, when a deal is accepted
+    // Corruption from deals stops just under the 100% Scandal penalty, so a
+    // deal can never on its own cost a seat and half the Money (same rule as
+    // exposeScandalCappedBelowPenalty for Dedahkan).
+    corruptionCap: 99,
+    trustAcceptCorruptDeal: -1, // recipient who accepts a deal
+    trustExposeSuccess: 2, // whoever successfully exposes a recorded deal
+    maxSkipTurns: 2, // a turn-skip counter never stacks past this
+    // Public Trust nudges Politik: (trust - 50) / 10 percentage points, so
+    // 0 trust is -5% and 100 trust is +5% on the promotion chance.
+    politikTrustDivisor: 10,
+    consequences: {
+      exposedBeforeAccept: {
+        initiator: { money: 20000, influence: 200, skipTurns: 1 },
+        recipient: { trust: 20, influence: 100 },
+      },
+      exposedAfterAccept: {
+        initiator: { money: 20000, influence: 200, skipTurns: 1, corruption: 20 },
+        recipient: { money: 2000, influence: 200, skipTurns: 0, corruption: 20 },
+      },
+      // The Clean Politician's own, longer suspension on either side of an
+      // exposed deal (GDD: "skip 2 turns").
+      cleanPoliticianSkipTurns: 2,
+    },
+  },
+
   // Seat capacity per rank is derived from the live player count (N) as
   // N minus these offsets, floored at 1 - president is always exactly 1
   // seat regardless of player count (there's only ever one winner). With

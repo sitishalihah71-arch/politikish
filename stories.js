@@ -200,7 +200,7 @@ export function buildActionStory(action, snapshot) {
   else if (action.type === 'sabotaj') story = sabotajStory(action, A, T, target, seq);
   else if (action.type === 'raid') story = raidStory(action, A, T, seq);
   else if (action.type === 'market') story = marketStory(action, A, seq);
-  else if (action.type === 'skip' && action.reason !== 'bribery-leak') story = skipStory(A);
+  else if (action.type === 'skip' && action.reason !== 'bribery-leak' && action.reason !== 'deal-exposed') story = skipStory(A);
   if (!story) return null;
 
   const penalties = penaltyLines(snapshot);

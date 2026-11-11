@@ -21,12 +21,20 @@ export const PROMOTION_MAX_CHANCE = cfg.maxChance / 100;
 
 // Party Machinery (a Political Asset) adds a flat bonus on top of the
 // extra-influence bonus, still capped the same way.
-export function calculatePolitikChance(fromRank, extraInfluence, hasPartyMachinery = false) {
+// `trustBonus` is Public Trust's small nudge (Mode Watak only, see
+// getTrustChanceBonus): it is added before the cap and can't go below zero.
+export function calculatePolitikChance(fromRank, extraInfluence, hasPartyMachinery = false, trustBonus = 0) {
   const config = PROMOTION_TABLE[fromRank];
   if (!config) return 0;
   const steps = Math.floor(Math.max(extraInfluence, 0) / PROMOTION_EXTRA_STEP);
   const machineryBonus = hasPartyMachinery ? PARTY_MACHINERY_BONUS : 0;
-  return Math.min(config.baseChance + steps * PROMOTION_EXTRA_BONUS + machineryBonus, PROMOTION_MAX_CHANCE);
+  return Math.max(0, Math.min(config.baseChance + steps * PROMOTION_EXTRA_BONUS + machineryBonus + trustBonus, PROMOTION_MAX_CHANCE));
+}
+
+// Public Trust (Approval Rating, start 50) as a promotion-chance nudge:
+// (trust - 50) / 10 percentage points, i.e. -5% at 0 up to +5% at 100.
+export function getTrustChanceBonus(approval) {
+  return ((approval - 50) / GAME_BALANCE.shadowPolitics.politikTrustDivisor) / 100;
 }
 
 export function getPolitikCost(fromRank, extraInfluence) {
@@ -46,12 +54,14 @@ export function validatePolitik(player, players, extraInfluence) {
   return { ok: true, toRank, cost };
 }
 
-export function resolvePolitik(player, players, extraInfluence, rng = Math.random) {
+// options.trust: Mode Watak is on, so Public Trust nudges the chance.
+export function resolvePolitik(player, players, extraInfluence, rng = Math.random, options = {}) {
   const validation = validatePolitik(player, players, extraInfluence);
   if (!validation.ok) return validation;
 
   const { toRank, cost } = validation;
-  const chance = calculatePolitikChance(player.rank, extraInfluence, hasAsset(player, 'partyMachinery'));
+  const trustBonus = options.trust ? getTrustChanceBonus(player.approval) : 0;
+  const chance = calculatePolitikChance(player.rank, extraInfluence, hasAsset(player, 'partyMachinery'), trustBonus);
   player.influence -= cost;
 
   const success = rng() < chance;

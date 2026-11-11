@@ -674,7 +674,7 @@ function makeSeatActionFor({ snapshot, localPlayer, rank, player, isTargetTier, 
       ...base,
       kind: 'politik',
       label: 'POLITIK',
-      chance: politics.calculatePolitikChance(localPlayer.rank, 0, hasMachinery),
+      chance: politics.calculatePolitikChance(localPlayer.rank, 0, hasMachinery, localPlayer.character ? politics.getTrustChanceBonus(localPlayer.approval) : 0),
       cost: politics.getPolitikCost(localPlayer.rank, 0),
       title: `Politik ke ${RANK_LABELS[rank]}`,
       onClick: () => match.attemptPolitik(0),
@@ -1693,7 +1693,9 @@ function handleActionResult(snapshot) {
   } else if (action.type === 'skip') {
     message = action.reason === 'bribery-leak'
       ? `${actorName}'s turn was skipped — their backroom deal leaked!`
-      : `Host skipped ${actorName}'s turn.`;
+      : action.reason === 'deal-exposed'
+        ? `${actorName}'s turn was skipped — a backroom deal was exposed!`
+        : `Host skipped ${actorName}'s turn.`;
     sound.playWarning();
   }
 
