@@ -18,7 +18,7 @@
 
 import { GAME_BALANCE } from './balance.js';
 import { adjustBalance, addCorruption, addSkipTurns, applyApprovalDelta } from './effects.js';
-import { reduceMoneyPenalty } from './abilities.js';
+import { reduceMoneyPenalty, characterIdOf } from './abilities.js';
 
 const cfg = GAME_BALANCE.shadowPolitics;
 const CLEAN_POLITICIAN = 'cleanPolitician';
@@ -31,7 +31,7 @@ export function resetEvidence() {
   tokenSeq = 0;
 }
 
-const isCleanPolitician = (player) => player?.character?.id === CLEAN_POLITICIAN;
+const isCleanPolitician = (player) => characterIdOf(player) === CLEAN_POLITICIAN;
 
 // What a player's skip is when one of their deals is exposed: the table's
 // number, or the Clean Politician's longer suspension.

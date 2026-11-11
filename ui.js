@@ -516,6 +516,15 @@ const ACTION_REJECT_MESSAGES = {
   'limit-reached': 'Kuasa itu sudah habis digunakan.',
   'cannot-initiate-deal': 'Watak anda tidak boleh memulakan Backroom Deal.',
   'deal-not-found': 'Tawaran itu sudah tiada.',
+  'inquiry-blocked': 'Siasatan Parlimen sedang berjalan: kuasa itu tidak boleh digunakan sekarang.',
+  'endorsement-active': 'Anda sudah ada sokongan rasmi yang aktif.',
+  'no-endorsement': 'Tiada sokongan rasmi yang aktif.',
+  'already-renewed': 'Sokongan itu sudah diperbaharui sekali.',
+  'invalid-mode': 'Pilihan itu tidak sah.',
+  'no-vote-open': 'Tiada sesi Parlimen yang sedang berjalan.',
+  'already-armed': 'Undi tambahan itu sudah diaktifkan.',
+  'character-not-in-match': 'Watak itu tiada dalam permainan ini.',
+  'view-expired': 'Maklumat itu sudah tamat tempoh.',
 };
 
 let hasEnteredMatchScreen = false;

@@ -206,6 +206,34 @@ export function getCharacter(id) {
   return CHARACTERS.find((c) => c.id === id) || null;
 }
 
+// Which character a player currently plays: normally the one they were dealt,
+// but an Opportunist who has used Copycat Politics IS the character they
+// copied from then on (Special, Passive and Weakness). One place to ask, so no
+// rule has to know about the copy.
+export function effectiveCharacterId(player) {
+  return player?.character?.copiedId || player?.character?.id || null;
+}
+
+// The characters an Opportunist may copy: those held by the OTHER players,
+// listed alphabetically so the list says nothing about who holds which.
+export function copyableCharacterIds(opportunist, players) {
+  const ids = players
+    .filter((p) => p.id !== opportunist.id && p.character)
+    .map((p) => effectiveCharacterId(p))
+    .filter((id) => id && id !== 'opportunist');
+  return [...new Set(ids)].sort();
+}
+
+// Becomes a copy of `characterId` for the rest of the game. The copy starts
+// with its own fresh cooldowns and limits (the Opportunist's single use of
+// Copycat is spent); shields and other armed effects stay.
+export function copyCharacter(player, characterId) {
+  player.character = { id: player.character.id, copiedId: characterId };
+  const state = player.abilityState || {};
+  Object.keys(state).forEach((key) => { if (key === 'special' || key.startsWith('special.')) delete state[key]; });
+  player.abilityState = state;
+}
+
 // The characters that can be dealt at this table size. The Opportunist's
 // pick list is "who is in the match", which at a small table would hand them
 // the opponents' identities outright, so it needs a minimum player count.
@@ -248,7 +276,7 @@ export function resolveAbilityLimit(characterId, abilityId) {
 // | 'unknown-ability' | 'cooldown' (with `availableRound`) | 'limit-reached'.
 export function checkAbilityUse(player, abilityId, round) {
   if (!player?.character) return { ok: false, reason: 'no-character' };
-  const resolved = resolveAbilityLimit(player.character.id, abilityId);
+  const resolved = resolveAbilityLimit(effectiveCharacterId(player), abilityId);
   if (!resolved) return { ok: false, reason: 'unknown-ability' };
 
   const { key, limit } = resolved;
@@ -266,7 +294,7 @@ export function checkAbilityUse(player, abilityId, round) {
 
 // Records a use. Callers check checkAbilityUse first; this never refuses.
 export function markAbilityUsed(player, abilityId, round) {
-  const resolved = resolveAbilityLimit(player.character?.id, abilityId);
+  const resolved = resolveAbilityLimit(effectiveCharacterId(player), abilityId);
   if (!resolved) return false;
   if (!player.abilityState) player.abilityState = {};
   const used = player.abilityState[resolved.key] || { lastRound: round, count: 0 };
@@ -277,7 +305,7 @@ export function markAbilityUsed(player, abilityId, round) {
 // For the UI: what to show next to an ability.
 export function getAbilityStatus(player, abilityId, round) {
   const check = checkAbilityUse(player, abilityId, round);
-  const resolved = player?.character ? resolveAbilityLimit(player.character.id, abilityId) : null;
+  const resolved = player?.character ? resolveAbilityLimit(effectiveCharacterId(player), abilityId) : null;
   const count = resolved ? (player.abilityState?.[resolved.key]?.count || 0) : 0;
   return {
     ready: check.ok,

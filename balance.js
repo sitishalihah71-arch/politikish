@@ -105,6 +105,53 @@ export const GAME_BALANCE = {
     // Bureaucrat: Projek has no Money cost to cut, so Administrative Efficiency
     // trims the Scandal a Projek card adds instead.
     bureaucrat: { projekScandalPercentOff: 20 },
+
+    // Kingmaker (maneuvers.js). Power Broker's +200 is the passive and is paid
+    // once per successful transfer. An endorsement pays both sides each round
+    // for `endorsementRounds` rounds; a renewal adds the same again (once).
+    kingmaker: {
+      powerBrokerMin: 250,
+      powerBrokerMax: 500,
+      powerBrokerBonus: 200,
+      endorsementCost: 300, // paid by the Kingmaker, received in full by the endorsed player
+      endorsementTrust: 2, // endorsed player's immediate Public Trust
+      endorsementPerRound: 100, // Influence to BOTH, at the start of each round while active
+      endorsementRounds: 3,
+      withdrawTrust: 2, // endorsed player loses this when support is withdrawn
+      liabilityTrust: 2, // Political Liability: the endorsed player is exposed
+      liabilityInfluence: 500,
+      bonusVotes: 1, // Bonus Voting Power: one additional vote, once per game
+    },
+    // Populist (maneuvers.js). Campaign cost = 20% of the Populist's money,
+    // never less than the minimum (GDD wording was incomplete, see decisions).
+    populist: {
+      campaignCostPercent: 20,
+      campaignMinCost: 5000,
+      campaignTrust: 20,
+      campaignInfluence: 100,
+      supportTrustPerRound: 5, // Public Support, from round 2 on
+      scandalExtraTrust: 40, // Scandal Damage, once per exposure
+    },
+  },
+
+  // National Events for Mode Watak (shadowEvents.js): their own deck, on a
+  // tighter beat than the ordinary National Events (which stay as they are).
+  // An event is drawn at the end of round `firstRound`, then every
+  // `intervalRounds`, and lasts the round that follows (Public Trust Collapse
+  // is instant).
+  shadowEvents: {
+    firstRound: 3,
+    intervalRounds: 4,
+    // Anti-Corruption Commission: targets at/above this Scandal are easier to
+    // investigate, the Money Man always is (Investigation Risk), and every
+    // investigator gets one extra free investigation that round.
+    commissionScandalThreshold: 60, // the existing "Disiasat" level
+    commissionTargetBonus: 15, // percentage points on the investigation chance
+    moneyManRiskBonus: 15,
+    trustCollapse: 10, // Public Trust points lost by everyone with an exposed scandal
+    // Parliamentary Inquiry: these cannot be used on/by anyone holding a
+    // hidden Evidence Token (someone with an investigation still open).
+    inquiryBlocked: ['lawyer', 'ally', 'bureaucrat'],
   },
 
   // Shadow Politics (Mode Watak only; evidence.js). Corruption Points are the

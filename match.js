@@ -17,7 +17,7 @@ import { bus, formatMoney } from './utils.js';
 import * as room from './room.js';
 import * as multiplayer from './multiplayer.js';
 import { RANKS, initMatchState, stripPrivateFields } from './player.js';
-import { dealCharacters, getCharacter, checkAbilityUse, markAbilityUsed } from './characters.js';
+import { dealCharacters, getCharacter, checkAbilityUse, markAbilityUsed, copyableCharacterIds, copyCharacter } from './characters.js';
 import { characterIdOf, armShield, claimIntegrityBonus } from './abilities.js';
 import { exposeToken } from './evidence.js';
 import {
@@ -25,6 +25,14 @@ import {
   applyForgedReportPenalty, resolveMediaTrial, isCharacterId, dealLabel,
 } from './investigation.js';
 import { applyScandalPenalty, tickPublicSupport, consumeSkipTurn, applyApprovalDelta, adjustBalance } from './effects.js';
+import {
+  powerBroker, startEndorsement, withdrawEndorsement, renewEndorsement, endorsementView, startOfRound,
+  armBonusVote, voteWeight, closeBonusVotes, runCampaign, reactToExposure, resetManeuvers,
+} from './maneuvers.js';
+import {
+  advanceShadowEvents, shadowEventView, investigationModifiers, freeInvestigationAvailable, claimFreeInvestigation,
+  inquiryBlocks, resetShadowEvents,
+} from './shadowEvents.js';
 import { generateProjectOffers, resolveProjek } from './projects.js';
 import { generateMediaOffers, resolveMedia } from './media.js';
 import { resolvePolitik } from './politics.js';
@@ -45,6 +53,7 @@ import { GAME_BALANCE } from './balance.js';
 
 let matchStarted = false;
 let currentRound = 1;
+let lastCharacterRound = 1; // the last round whose start-of-round effects ran (Mode Watak)
 let maxRounds = GAME_BALANCE.room.defaultRounds; // captured from room settings at match start
 let turnSlot = 1;
 let matchOver = false;
@@ -120,6 +129,14 @@ let passiveSeq = 0;
 let revealGate = null; // host: { waiting: Set<playerId>, timer }
 let clientRevealGate = null; // clients: { waitingIds } as last broadcast
 
+// Mode Watak public state: the active National Event and the announced
+// endorsement. Host builds it from its modules; clients mirror what was sent.
+let clientShadow = null;
+function shadowView(players) {
+  if (!charactersMode) return null;
+  return { event: shadowEventView(), endorsement: endorsementView(players) };
+}
+
 function revealGateView() {
   return revealGate ? { waitingIds: [...revealGate.waiting] } : null;
 }
@@ -184,6 +201,7 @@ export function getMatchSnapshot() {
     marketStock: [...marketStock],
     passivePayout,
     characterReveal: isHostRole() ? revealGateView() : clientRevealGate,
+    shadow: isHostRole() ? shadowView(players) : clientShadow,
     contracts: isHostRole() ? getContractViewsFor(roomSnap.localPlayerId) : clientContracts,
     pendingDeals: isHostRole() ? getPendingDealViewsFor(roomSnap.localPlayerId) : clientPendingDeals,
   };
@@ -206,6 +224,7 @@ function buildBroadcastPayloadFor(viewerId) {
     marketStock: [...marketStock],
     passivePayout,
     characterReveal: revealGateView(),
+    shadow: shadowView(currentPlayers()),
     contracts: getContractViewsFor(viewerId),
     pendingDeals: getPendingDealViewsFor(viewerId),
   };
@@ -346,9 +365,14 @@ function resolveVote() {
 
   const vote = pendingVote;
   const players = room.getPlayersLive();
-  const yesCount = players.filter((p) => vote.votes[p.id] === 'yes').length;
-  const noCount = players.filter((p) => vote.votes[p.id] === 'no').length;
-  const abstainCount = players.length - yesCount - noCount;
+  // A Kingmaker's armed Bonus Voting Power makes their vote count twice.
+  const tally = (choice) => players.filter((p) => vote.votes[p.id] === choice).reduce((n, p) => n + voteWeight(p), 0);
+  const yesCount = tally('yes');
+  const noCount = tally('no');
+  const castCount = players.filter((p) => vote.votes[p.id] === 'yes' || vote.votes[p.id] === 'no').length;
+  const abstainCount = players.length - castCount;
+  const bonusUsed = closeBonusVotes(players, vote.votes);
+  bonusUsed.forEach((p) => markAbilityUsed(p, 'special.bonusVote', currentRound));
   const passed = yesCount > noCount;
 
   const motion = PARLIAMENT_MOTIONS.find((m) => m.id === vote.motionId);
@@ -358,7 +382,7 @@ function resolveVote() {
 
   pendingVote = null;
 
-  const outcomeNote = motion.type === 'no-confidence' && passed ? ` ${target?.name} is demoted to Ahli Biasa.` : '';
+  const outcomeNote = (motion.type === 'no-confidence' && passed ? ` ${target?.name} is demoted to Ahli Biasa.` : '') + (bonusUsed.length ? ' (satu undi dikira berganda)' : '');
   postNews({
     icon: '🏛️',
     headline: passed ? 'MOTION PASSED' : 'MOTION FAILED',
@@ -461,6 +485,10 @@ function advanceTurn({ skipSupportTick = false } = {}) {
     return;
   }
 
+  if (charactersMode && round > lastCharacterRound) {
+    lastCharacterRound = round;
+    runCharacterRoundStart(round, players);
+  }
   maybeTriggerParliamentSession(completedRound, players);
   settleTurnState();
 }
@@ -815,16 +843,19 @@ function hostProposeDeal(offererId, targetId, money, influence, condition, respo
 // and obeys the character's own cooldown / per-game limit (characters.js).
 const turnKey = () => `${currentRound}:${turnSlot}`;
 
-function checkSpecialUse(player, abilityId = 'special') {
+// `free`: the Anti-Corruption Commission's extra investigation - it ignores
+// the cooldown (and starts none).
+function checkSpecialUse(player, abilityId = 'special', { free = false } = {}) {
   if (!charactersMode) return { ok: false, reason: 'ability-unavailable' };
   if (!isActivePlayerId(player.id)) return { ok: false, reason: 'not-your-turn' };
   if (specialTurnKey === turnKey()) return { ok: false, reason: 'special-used-this-turn' };
+  if (free) return { ok: true };
   const check = checkAbilityUse(player, abilityId, currentRound);
   return check.ok ? { ok: true } : { ok: false, reason: check.reason };
 }
 
-function spendSpecial(player, abilityId = 'special') {
-  markAbilityUsed(player, abilityId, currentRound);
+function spendSpecial(player, abilityId = 'special', { free = false } = {}) {
+  if (!free) markAbilityUsed(player, abilityId, currentRound);
   specialTurnKey = turnKey();
 }
 
@@ -859,6 +890,14 @@ function hostUseAbility(playerId, abilityId, payload, respond) {
 
   if (abilityId === 'follow' && (characterId === 'journalist' || characterId === 'whistleblower')) return hostFollowUp(ctx);
   if (abilityId === 'special' && (characterId === 'lawyer' || characterId === 'ally')) return useShield(ctx, characterId);
+  if (characterId === 'kingmaker') {
+    if (abilityId === 'special.bonusVote') return useBonusVote(ctx);
+    if (abilityId === 'special.powerBroker') return usePowerBroker(ctx);
+    if (abilityId === 'special.endorsement') return useEndorsement(ctx);
+    if (abilityId === 'special.withdrawRenew') return useWithdrawRenew(ctx);
+  }
+  if (abilityId === 'special' && characterId === 'populist') return useCampaign(ctx);
+  if (abilityId === 'special' && characterId === 'opportunist') return useCopycat(ctx);
   if (abilityId === 'special' && characterId === 'bureaucrat') return useFalsify(ctx);
   if (abilityId === 'special' && (characterId === 'spy' || characterId === 'whistleblower')) return useInvestigation(ctx, characterId);
   if (characterId === 'journalist' && abilityId === 'special.report') return useInvestigation(ctx, 'journalist');
@@ -873,6 +912,7 @@ function useShield({ players, player, payload, reject, abilityId }, characterId)
   const target = players.find((p) => p.id === payload?.targetId);
   if (!target) return reject('invalid-target');
   if (characterId === 'ally' && target.id === player.id) return reject('invalid-target'); // protects ANOTHER player
+  if (inquiryBlocks(player, target)) return reject('inquiry-blocked');
 
   armShield(target, characterId === 'ally' ? 'ally' : 'lawyer', { sourceSlot: player.slot, round: currentRound });
   spendSpecial(player, abilityId);
@@ -893,6 +933,7 @@ function useFalsify({ players, player, payload, reject, abilityId }) {
   if (!use.ok) return reject(use.reason);
   const target = players.find((p) => p.id === payload?.targetId);
   if (!target || target.id === player.id) return reject('invalid-target');
+  if (inquiryBlocks(player, target)) return reject('inquiry-blocked');
   const result = falsify(player, target);
   if (!result.ok) return reject(result.reason);
   spendSpecial(player, abilityId);
@@ -903,15 +944,19 @@ function useFalsify({ players, player, payload, reject, abilityId }) {
 // The investigation roll shared by the Spy, Journalist (Investigative Report)
 // and Whistleblower. A failed roll and an empty search look the same.
 function useInvestigation({ players, player, payload, reject, abilityId }, kind) {
-  const use = checkSpecialUse(player, abilityId);
+  // The Anti-Corruption Commission gives every investigator one free
+  // investigation (no cooldown) while it lasts.
+  const free = freeInvestigationAvailable(player);
+  const use = checkSpecialUse(player, abilityId, { free });
   if (!use.ok) return reject(use.reason);
   const target = players.find((p) => p.id === payload?.targetId);
   if (!target || target.id === player.id) return reject('invalid-target');
   if (kind === 'spy' && !SPY_CATEGORIES.includes(payload?.category)) return reject('invalid-category');
 
-  spendSpecial(player, abilityId);
+  spendSpecial(player, abilityId, { free });
+  if (free) claimFreeInvestigation(player);
   dropViews(player.slot);
-  const success = rollInvestigation(target);
+  const success = rollInvestigation(target, investigationModifiers(target));
   const result = { abilityId, ok: true, kind: 'investigation', investigator: kind, targetId: target.id, success };
 
   if (kind === 'spy') {
@@ -978,7 +1023,174 @@ function hostFollowUp({ players, player, payload, reject }) {
     maybeCompleteObjective(p);
   });
   maybeCompleteObjective(player);
+  announceExposure([a, b], players);
   broadcastMatchUpdate();
+}
+
+// A deal was confirmed exposed: the Populist's Scandal Damage and the
+// Kingmaker's Political Liability (maneuvers.js) are settled here, in one
+// place for every way a deal can come out.
+function announceExposure(exposedPlayers, players) {
+  if (!charactersMode) return;
+  const out = reactToExposure(exposedPlayers.filter(Boolean), players);
+  out.populist.forEach((x) => {
+    notifyPlayer(x.id, 'ability-notice', { kind: 'scandal-damage', text: `Skandal Damage: anda hilang ${x.trust}% kepercayaan awam tambahan.` });
+  });
+  if (out.liability) {
+    const l = out.liability;
+    notifyPlayer(l.kingmakerId, 'ability-notice', {
+      kind: 'political-liability',
+      text: `Political Liability: pemain yang anda sokong terdedah. Anda hilang ${l.trust}% kepercayaan awam dan ${l.influence} Influence.`,
+    });
+  }
+}
+
+// ---------- Kingmaker, Populist, Opportunist (Mode Watak) ----------
+
+// Power Broker: move 250-500 of the Kingmaker's Influence to another player.
+// The +200 Kingmaker's Cut is paid once, after the transfer went through.
+function usePowerBroker({ players, player, payload, reject, abilityId }) {
+  const use = checkSpecialUse(player, abilityId);
+  if (!use.ok) return reject(use.reason);
+  const target = players.find((p) => p.id === payload?.targetId);
+  if (!target || target.id === player.id) return reject('invalid-target');
+  const result = powerBroker(player, target, Number(payload?.amount));
+  if (!result.ok) return reject(result.reason);
+  spendSpecial(player, abilityId);
+  notifyPlayer(player.id, 'ability-result', { abilityId, ok: true, targetId: target.id, amount: result.amount, bonus: result.bonus });
+  notifyPlayer(target.id, 'ability-notice', { kind: 'power-broker', text: `Seseorang memindahkan ${result.amount} Influence kepada anda.` });
+  maybeCompleteObjective(player);
+  maybeCompleteObjective(target);
+  broadcastMatchUpdate();
+}
+
+// Official Endorsement: once per game, announced to everyone.
+function useEndorsement({ players, player, payload, reject, abilityId }) {
+  const use = checkSpecialUse(player, abilityId);
+  if (!use.ok) return reject(use.reason);
+  const target = players.find((p) => p.id === payload?.targetId);
+  if (!target || target.id === player.id) return reject('invalid-target');
+  const result = startEndorsement(player, target, currentRound);
+  if (!result.ok) return reject(result.reason);
+  spendSpecial(player, abilityId);
+  const k = GAME_BALANCE.characters.kingmaker;
+  postNews({
+    icon: '🤝',
+    headline: 'SOKONGAN RASMI',
+    description: `${player.name} secara rasmi menyokong ${target.name}. ${target.name} menerima ${k.endorsementCost} Influence dan +${result.trust}% kepercayaan awam. Kedua-duanya mendapat +${k.endorsementPerRound} Influence setiap ronda sehingga ronda ${result.expiresRound}.`,
+    feedText: `🤝 ${player.name} menyokong ${target.name}!`,
+    feedType: 'news',
+  });
+  notifyPlayer(player.id, 'ability-result', { abilityId, ok: true, targetId: target.id, expiresRound: result.expiresRound });
+  maybeCompleteObjective(player);
+  maybeCompleteObjective(target);
+  broadcastMatchUpdate();
+}
+
+// Withdraw (target -2% Public Trust, announced, final) or renew (3 more
+// rounds, once) the active endorsement.
+function useWithdrawRenew({ players, player, payload, reject, abilityId }) {
+  const use = checkSpecialUse(player, abilityId);
+  if (!use.ok) return reject(use.reason);
+  const mode = payload?.mode;
+  if (mode !== 'withdraw' && mode !== 'renew') return reject('invalid-mode');
+
+  if (mode === 'renew') {
+    const result = renewEndorsement(player);
+    if (!result.ok) return reject(result.reason);
+    spendSpecial(player, abilityId);
+    notifyPlayer(player.id, 'ability-result', { abilityId, ok: true, mode, expiresRound: result.expiresRound });
+    broadcastMatchUpdate();
+    return;
+  }
+  const result = withdrawEndorsement(player, players);
+  if (!result.ok) return reject(result.reason);
+  spendSpecial(player, abilityId);
+  postNews({
+    icon: '💔',
+    headline: 'SOKONGAN DITARIK BALIK',
+    description: `${player.name} menarik balik sokongan terhadap ${result.target?.name || 'seorang ahli'}. ${result.target?.name || 'Beliau'} hilang ${result.trust}% kepercayaan awam dan bayaran asal tidak dipulangkan.`,
+    feedText: `💔 ${player.name} menarik balik sokongan daripada ${result.target?.name || 'seorang ahli'}!`,
+    feedType: 'news',
+  });
+  notifyPlayer(player.id, 'ability-result', { abilityId, ok: true, mode, targetId: result.target?.id || null });
+  broadcastMatchUpdate();
+}
+
+// Bonus Voting Power: armed during an open Parliament session (any time before
+// it closes, not turn-gated). It is only spent if the Kingmaker then voted.
+function useBonusVote({ player, reject, abilityId }) {
+  if (!charactersMode) return reject('ability-unavailable');
+  if (!pendingVote) return reject('no-vote-open');
+  const check = checkAbilityUse(player, abilityId, currentRound);
+  if (!check.ok) return reject(check.reason);
+  const armed = armBonusVote(player);
+  if (!armed.ok) return reject(armed.reason);
+  notifyPlayer(player.id, 'ability-result', { abilityId, ok: true, armed: true });
+  broadcastMatchUpdate();
+}
+
+// Populist's Public Campaign (private: the result is for the Populist alone).
+function useCampaign({ player, reject, abilityId }) {
+  const use = checkSpecialUse(player, abilityId);
+  if (!use.ok) return reject(use.reason);
+  const result = runCampaign(player);
+  if (!result.ok) return reject(result.reason);
+  spendSpecial(player, abilityId);
+  notifyPlayer(player.id, 'ability-result', { abilityId, ok: true, cost: result.cost, trust: result.trust, influence: result.influence });
+  maybeCompleteObjective(player);
+  broadcastMatchUpdate();
+}
+
+// Opportunist's Copycat Politics. With no `characterId` it only lists what can
+// be copied (the characters held by the other players, alphabetically, never
+// who holds which). With one, the Opportunist becomes that character for good.
+function useCopycat({ players, player, payload, reject, abilityId }) {
+  const use = checkSpecialUse(player, abilityId);
+  if (!use.ok) return reject(use.reason);
+  const options = copyableCharacterIds(player, players);
+  if (!payload?.characterId) {
+    notifyPlayer(player.id, 'ability-result', { abilityId, ok: true, kind: 'copy-options', options });
+    return;
+  }
+  if (!options.includes(payload.characterId)) return reject('character-not-in-match');
+  spendSpecial(player, abilityId); // the one use of Copycat; the copy then starts fresh
+  copyCharacter(player, payload.characterId);
+  const copied = getCharacter(payload.characterId);
+  notifyPlayer(player.id, 'ability-result', { abilityId, ok: true, kind: 'copy', characterId: copied.id, characterName: copied.name });
+  broadcastMatchUpdate();
+}
+
+// A new round has begun (never round 1, never a round past the end): the
+// Populist's Public Support, endorsement payouts and expiry, and the round's
+// National Event for Mode Watak.
+function runCharacterRoundStart(round, players) {
+  const out = startOfRound(round, players);
+  out.endorsementPaid.forEach((x) => {
+    notifyPlayer(x.id, 'ability-notice', { kind: 'endorsement-pay', text: `Sokongan rasmi: +${x.influence} Influence.` });
+  });
+  if (out.endorsementExpired) {
+    const { kingmakerId, targetId } = out.endorsementExpired;
+    [kingmakerId, targetId].filter(Boolean).forEach((id) => {
+      notifyPlayer(id, 'ability-notice', { kind: 'endorsement-expired', text: 'Sokongan rasmi telah tamat.' });
+    });
+  }
+  out.populist.forEach((x) => {
+    notifyPlayer(x.id, 'ability-notice', { kind: 'public-support', text: `Public Support: +${x.trust}% kepercayaan awam.` });
+  });
+
+  // The room's National Events setting also governs Mode Watak's own deck.
+  const drawn = room.getRoomSnapshot().settings.nationalEvents ? advanceShadowEvents(round, players) : null;
+  if (drawn) {
+    const hit = drawn.affected.map((x) => players.find((p) => p.id === x.id)?.name).filter(Boolean);
+    postNews({
+      icon: drawn.event.icon,
+      headline: drawn.event.name.toUpperCase(),
+      description: `${drawn.event.description}${hit.length ? ` Terkesan: ${hit.join(', ')}.` : ''}`,
+      feedText: `${drawn.event.icon} ${drawn.event.name}`,
+      feedType: 'news',
+    });
+  }
 }
 
 // ---------- Media Trial ----------
@@ -1096,6 +1308,7 @@ function hostExposeOffer(responderId, dealId, respond) {
   announceShieldUse(offerer, cost);
   maybeCompleteObjective(offerer);
   maybeCompleteObjective(target);
+  announceExposure([offerer], players); // only the offerer is exposed; the Clean Politician is rewarded
   broadcastMatchUpdate();
 }
 
@@ -1127,6 +1340,7 @@ function hostRespondToDeal(responderId, dealId, accept) {
   const target = players.find((p) => p.id === result.targetId);
 
   if (result.leaked) {
+    announceExposure([offerer, target], players);
     postNews({
       icon: '📰',
       headline: 'BREAKING NEWS',
@@ -1203,6 +1417,7 @@ function hostExposeContract(requesterId, contractId) {
   });
   maybeCompleteObjective(offerer);
   maybeCompleteObjective(target);
+  announceExposure([offerer, target], players);
   notifyPlayer(offerer.id, 'deal-contract-event', { kind: 'exposed', contract: result.contract, role: 'offerer', otherId: target.id });
   notifyPlayer(target.id, 'deal-contract-event', { kind: 'exposed', contract: result.contract, role: 'target', otherId: offerer.id });
   broadcastMatchUpdate();
@@ -1392,6 +1607,7 @@ function handleClientMatchMessage(type, payload) {
     marketStock = payload.marketStock || [];
     passivePayout = payload.passivePayout || null;
     clientRevealGate = payload.characterReveal || null;
+    clientShadow = payload.shadow || null;
     clientContracts = payload.contracts || [];
     clientPendingDeals = payload.pendingDeals || [];
     bus.emit('match:updated', getMatchSnapshot());
@@ -1639,6 +1855,9 @@ bus.on('room:match-started', () => {
   resetChats();
   clearBotChatTimers();
   clientPendingDeals = [];
+  lastCharacterRound = 1;
+  resetManeuvers();
+  resetShadowEvents();
 
   const roomSnap = room.getRoomSnapshot();
   maxRounds = roomSnap.settings.rounds;
@@ -1721,6 +1940,10 @@ export function resetMatch() {
   clearTimeout(revealGate?.timer);
   revealGate = null;
   clientRevealGate = null;
+  clientShadow = null;
+  lastCharacterRound = 1;
+  resetManeuvers();
+  resetShadowEvents();
   clearTimeout(voteTimer);
   voteTimer = null;
   resetDeals();

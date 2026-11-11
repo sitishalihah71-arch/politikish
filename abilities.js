@@ -6,16 +6,14 @@
 // Everything here is only reached in Mode Watak.
 
 import { GAME_BALANCE } from './balance.js';
-import { getCharacter } from './characters.js';
+import { getCharacter, effectiveCharacterId } from './characters.js';
 import { adjustBalance } from './effects.js';
 
 const cfg = GAME_BALANCE.characters;
 
-// Which character a player currently plays. One place to ask, so the
-// Opportunist's copy (a later phase) only has to change this.
-export function characterIdOf(player) {
-  return player?.character?.id || null;
-}
+// Which character a player currently plays (an Opportunist who copied
+// someone is that character; see characters.js).
+export const characterIdOf = effectiveCharacterId;
 
 export function categoryOf(player) {
   return getCharacter(characterIdOf(player))?.category || null;

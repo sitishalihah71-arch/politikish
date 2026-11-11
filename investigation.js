@@ -37,11 +37,12 @@ const roundTo = (n, step) => Math.round(n / step) * step;
 
 // ---------- Chance ----------
 
-// `ctx.forceSuccess` is for events that guarantee a result (a later phase).
-export function investigationChance(target, { forceSuccess = false } = {}) {
+// `forceSuccess` is for events that guarantee a result (Leaked Audio).
+// `bonus` is extra percentage points from an event (shadowEvents.js).
+export function investigationChance(target, { forceSuccess = false, bonus = 0 } = {}) {
   if (forceSuccess) return 1;
   const c = cfg.investigation;
-  let pct = c.baseChance + c.scandalWeight * (target.scandal || 0);
+  let pct = c.baseChance + c.scandalWeight * (target.scandal || 0) + bonus;
   if (characterIdOf(target) === 'fixer') pct += c.fixerPaperTrailBonus; // weakness: Paper Trail
   return Math.min(pct, c.maxChance) / 100;
 }
