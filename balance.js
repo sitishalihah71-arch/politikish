@@ -85,6 +85,26 @@ export const GAME_BALANCE = {
       allyBonusInfluence: 100, // Mutual Support: when the Ally's shield actually saves someone money
       maxReductionPct: 50,
     },
+
+    // Investigations (investigation.js): free, on the investigator's own turn.
+    // Chance = base + weight x target's Scandal, capped. The Fixer's Paper
+    // Trail adds to it. A failed search and an empty one look the same.
+    investigation: { baseChance: 50, scandalWeight: 0.3, maxChance: 90, fixerPaperTrailBonus: 15 },
+    spy: { clues: 2, extraClues: 1 }, // Additional Clue (passive) adds one
+    // Defamation (Journalist weakness): a wrong Media Trial. Shield-eligible.
+    defamation: { money: 20000, trust: 5 },
+    // A Journalist who publishes a report built on forged evidence: half of it.
+    forgedReport: { money: 10000, trust: 2 },
+    mediaTrial: {
+      admitTrust: 5, // accused admits a correct accusation
+      challengeTrust: 10, // accused challenges a correct accusation, the host confirms
+      journalistInfluence: 200, // Public Influence (passive)
+      responseMs: 45000, // no answer counts as a challenge
+    },
+    whistleblower: { exposeTrust: 5, exposeInfluence: 100 },
+    // Bureaucrat: Projek has no Money cost to cut, so Administrative Efficiency
+    // trims the Scandal a Projek card adds instead.
+    bureaucrat: { projekScandalPercentOff: 20 },
   },
 
   // Shadow Politics (Mode Watak only; evidence.js). Corruption Points are the

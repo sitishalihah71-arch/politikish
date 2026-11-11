@@ -45,14 +45,16 @@ export function getProjekReward(player, card, playerCount) {
 // rewards scale down slightly as the table grows (see getEconomyScale) so a
 // full room doesn't flood the economy compared to a small one - scandal
 // cost is untouched.
-export function resolveProjek(player, cardId, playerCount) {
+// `options.scandalPercentOff` trims the Scandal the card adds (Bureaucrat).
+export function resolveProjek(player, cardId, playerCount, options = {}) {
   const card = getProjectCard(cardId);
   if (!card) return null;
 
   const reward = getProjekReward(player, card, playerCount);
   player.money += reward.money;
   player.influence += reward.influence;
-  applyScandalDelta(player, card.scandal);
+  const scandal = options.scandalPercentOff ? Math.round((card.scandal * (100 - options.scandalPercentOff)) / 100) : card.scandal;
+  applyScandalDelta(player, scandal);
   applyApprovalDelta(player, GAME_BALANCE.approvalRating.projekGain);
   player.stats.projectsCompleted += 1;
   player.politicalNetwork[card.category] += 1;

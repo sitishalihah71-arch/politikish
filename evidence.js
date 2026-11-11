@@ -115,7 +115,7 @@ function take(player, money, influence, ctx) {
 // whoever did it (gets the small Public Trust reward unless they are one of
 // the two parties). Penalties are applied once: a second call is refused.
 // reason codes: 'token-not-found' | 'already-exposed' | 'player-missing'
-export function exposeToken(tokenId, players, { round = null, exposerSlot = null } = {}) {
+export function exposeToken(tokenId, players, { round = null, exposerSlot = null, trustReward = cfg.trustExposeSuccess } = {}) {
   const token = tokens.find((t) => t.id === tokenId);
   if (!token) return { ok: false, reason: 'token-not-found' };
   if (token.exposed) return { ok: false, reason: 'already-exposed' };
@@ -142,7 +142,7 @@ export function exposeToken(tokenId, players, { round = null, exposerSlot = null
   const exposer = exposerSlot === null ? null : players.find((p) => p.slot === exposerSlot);
   if (exposer && exposer.slot !== initiator.slot && exposer.slot !== recipient.slot) {
     const before = exposer.approval;
-    applyApprovalDelta(exposer, cfg.trustExposeSuccess);
+    applyApprovalDelta(exposer, trustReward);
     exposerReward = exposer.approval - before;
   }
   return { ok: true, token: copyOf(token), result, exposerReward };

@@ -17,9 +17,14 @@ import { bus, formatMoney } from './utils.js';
 import * as room from './room.js';
 import * as multiplayer from './multiplayer.js';
 import { RANKS, initMatchState, stripPrivateFields } from './player.js';
-import { dealCharacters, checkAbilityUse, markAbilityUsed } from './characters.js';
+import { dealCharacters, getCharacter, checkAbilityUse, markAbilityUsed } from './characters.js';
 import { characterIdOf, armShield, claimIntegrityBonus } from './abilities.js';
-import { applyScandalPenalty, tickPublicSupport, consumeSkipTurn, applyApprovalDelta } from './effects.js';
+import { exposeToken } from './evidence.js';
+import {
+  falsify, rollInvestigation, spyReport, SPY_CATEGORIES, buildFullViews, getView, dropViews, hiddenTokenCount,
+  applyForgedReportPenalty, resolveMediaTrial, isCharacterId, dealLabel,
+} from './investigation.js';
+import { applyScandalPenalty, tickPublicSupport, consumeSkipTurn, applyApprovalDelta, adjustBalance } from './effects.js';
 import { generateProjectOffers, resolveProjek } from './projects.js';
 import { generateMediaOffers, resolveMedia } from './media.js';
 import { resolvePolitik } from './politics.js';
@@ -602,7 +607,8 @@ function hostResolveProjek(playerId, cardId) {
   const players = room.getPlayersLive();
   const player = players.find((p) => p.id === playerId);
   if (!player) return;
-  const card = resolveProjek(player, cardId, players.length);
+  const bureaucrat = charactersMode && characterIdOf(player) === 'bureaucrat';
+  const card = resolveProjek(player, cardId, players.length, bureaucrat ? { scandalPercentOff: GAME_BALANCE.characters.bureaucrat.projekScandalPercentOff } : {});
   if (!card) return;
   maybeRollKabelUnlock(player, card.category);
   setLastAction({ type: 'projek', actorId: playerId, card });
@@ -809,16 +815,16 @@ function hostProposeDeal(offererId, targetId, money, influence, condition, respo
 // and obeys the character's own cooldown / per-game limit (characters.js).
 const turnKey = () => `${currentRound}:${turnSlot}`;
 
-function checkSpecialUse(player) {
+function checkSpecialUse(player, abilityId = 'special') {
   if (!charactersMode) return { ok: false, reason: 'ability-unavailable' };
   if (!isActivePlayerId(player.id)) return { ok: false, reason: 'not-your-turn' };
   if (specialTurnKey === turnKey()) return { ok: false, reason: 'special-used-this-turn' };
-  const check = checkAbilityUse(player, 'special', currentRound);
+  const check = checkAbilityUse(player, abilityId, currentRound);
   return check.ok ? { ok: true } : { ok: false, reason: check.reason };
 }
 
-function spendSpecial(player) {
-  markAbilityUsed(player, 'special', currentRound);
+function spendSpecial(player, abilityId = 'special') {
+  markAbilityUsed(player, abilityId, currentRound);
   specialTurnKey = turnKey();
 }
 
@@ -840,24 +846,36 @@ function announceShieldUse(player, lost) {
   });
 }
 
-// Powers that are not a deal: for now the Lawyer's Legal Defence and the
-// Ally's Protective Alliance - each arms a shield on a chosen player.
+// Powers that are not a deal. One entry point; each character's special is a
+// small handler below. `follow` is the second half of a Journalist report or a
+// Whistleblower investigation (act on what was just found, same turn).
 function hostUseAbility(playerId, abilityId, payload, respond) {
   const players = room.getPlayersLive();
   const player = players.find((p) => p.id === playerId);
   if (!player) return;
   const reject = (reason) => respond({ type: 'action-rejected', payload: { reason } });
   const characterId = characterIdOf(player);
-  if (abilityId !== 'special' || (characterId !== 'lawyer' && characterId !== 'ally')) return reject('ability-unavailable');
+  const ctx = { players, player, payload, reject, abilityId };
 
-  const use = checkSpecialUse(player);
+  if (abilityId === 'follow' && (characterId === 'journalist' || characterId === 'whistleblower')) return hostFollowUp(ctx);
+  if (abilityId === 'special' && (characterId === 'lawyer' || characterId === 'ally')) return useShield(ctx, characterId);
+  if (abilityId === 'special' && characterId === 'bureaucrat') return useFalsify(ctx);
+  if (abilityId === 'special' && (characterId === 'spy' || characterId === 'whistleblower')) return useInvestigation(ctx, characterId);
+  if (characterId === 'journalist' && abilityId === 'special.report') return useInvestigation(ctx, 'journalist');
+  if (characterId === 'journalist' && abilityId === 'special.mediaTrial') return useMediaTrial(ctx);
+  return reject('ability-unavailable');
+}
+
+// Lawyer's Legal Defence / Ally's Protective Alliance: arm a shield on a chosen player.
+function useShield({ players, player, payload, reject, abilityId }, characterId) {
+  const use = checkSpecialUse(player, abilityId);
   if (!use.ok) return reject(use.reason);
   const target = players.find((p) => p.id === payload?.targetId);
   if (!target) return reject('invalid-target');
   if (characterId === 'ally' && target.id === player.id) return reject('invalid-target'); // protects ANOTHER player
 
   armShield(target, characterId === 'ally' ? 'ally' : 'lawyer', { sourceSlot: player.slot, round: currentRound });
-  spendSpecial(player);
+  spendSpecial(player, abilityId);
   notifyPlayer(player.id, 'ability-result', { abilityId, ok: true, targetId: target.id });
   if (target.id !== player.id) {
     notifyPlayer(target.id, 'ability-notice', {
@@ -866,6 +884,182 @@ function hostUseAbility(playerId, abilityId, payload, respond) {
     });
   }
   broadcastMatchUpdate(); // the owner's cooldown and the target's shield live in private state
+}
+
+// Bureaucrat's Falsify Evidence: from now on the Spy and Journalist are shown
+// forged evidence about the chosen player. Nobody is told.
+function useFalsify({ players, player, payload, reject, abilityId }) {
+  const use = checkSpecialUse(player, abilityId);
+  if (!use.ok) return reject(use.reason);
+  const target = players.find((p) => p.id === payload?.targetId);
+  if (!target || target.id === player.id) return reject('invalid-target');
+  const result = falsify(player, target);
+  if (!result.ok) return reject(result.reason);
+  spendSpecial(player, abilityId);
+  notifyPlayer(player.id, 'ability-result', { abilityId, ok: true, targetId: target.id });
+  broadcastMatchUpdate();
+}
+
+// The investigation roll shared by the Spy, Journalist (Investigative Report)
+// and Whistleblower. A failed roll and an empty search look the same.
+function useInvestigation({ players, player, payload, reject, abilityId }, kind) {
+  const use = checkSpecialUse(player, abilityId);
+  if (!use.ok) return reject(use.reason);
+  const target = players.find((p) => p.id === payload?.targetId);
+  if (!target || target.id === player.id) return reject('invalid-target');
+  if (kind === 'spy' && !SPY_CATEGORIES.includes(payload?.category)) return reject('invalid-category');
+
+  spendSpecial(player, abilityId);
+  dropViews(player.slot);
+  const success = rollInvestigation(target);
+  const result = { abilityId, ok: true, kind: 'investigation', investigator: kind, targetId: target.id, success };
+
+  if (kind === 'spy') {
+    if (success) result.report = spyReport(player, target, payload.category, players, currentRound);
+    // The target always learns they were looked at; only a blown cover shows who.
+    notifyPlayer(target.id, 'ability-notice', {
+      kind: 'investigated',
+      by: success ? null : player.name,
+      text: success ? 'Seseorang menyiasat anda secara rahsia.' : `${player.name} cuba menyiasat anda secara rahsia tetapi gagal. Penyamaran terbongkar!`,
+    });
+  } else if (success) {
+    result.views = buildFullViews(kind, player, target, players, turnKey());
+    result.evidenceCount = hiddenTokenCount(target.slot);
+    result.publicTrust = target.approval;
+  }
+  notifyPlayer(player.id, 'ability-result', result);
+  broadcastMatchUpdate();
+}
+
+// The second half: publish (Journalist) or expose (Whistleblower) one thing
+// found this turn. One per activation. A forged view exposes nothing.
+function hostFollowUp({ players, player, payload, reject }) {
+  if (!charactersMode || !isActivePlayerId(player.id)) return reject('not-your-turn');
+  const view = getView(player.slot, payload?.viewId, turnKey());
+  if (!view) return reject('view-expired');
+  const isWhistleblower = characterIdOf(player) === 'whistleblower';
+  dropViews(player.slot); // one accusation per activation, whatever happens next
+
+  if (view.forged) {
+    const lost = applyForgedReportPenalty(player, players);
+    notifyPlayer(player.id, 'ability-result', {
+      abilityId: 'follow', ok: true, success: false, forged: true,
+      text: `Laporan anda tidak dapat disahkan. Bukti itu dipalsukan! Anda hilang ${formatMoney(lost.money)} dan ${lost.trust}% kepercayaan awam.`,
+    });
+    announceShieldUse(player, lost);
+    broadcastMatchUpdate();
+    return;
+  }
+
+  const wb = GAME_BALANCE.characters.whistleblower;
+  const exposed = exposeToken(view.tokenId, players, {
+    round: currentRound,
+    exposerSlot: player.slot,
+    trustReward: isWhistleblower ? wb.exposeTrust : GAME_BALANCE.shadowPolitics.trustExposeSuccess,
+  });
+  if (!exposed.ok) return reject(exposed.reason);
+  if (isWhistleblower) adjustBalance(player, 'influence', wb.exposeInfluence);
+
+  const { token, result } = exposed;
+  const a = players.find((p) => p.slot === token.initiatorSlot);
+  const b = players.find((p) => p.slot === token.recipientSlot);
+  const cost = (r) => [r.money ? formatMoney(r.money) : '', r.influence ? `${r.influence} Influence` : ''].filter(Boolean).join(' dan ');
+  postNews({
+    icon: '🗂️',
+    headline: 'FAIL 101 DIDEDAH',
+    description: `Dokumen sulit bocor: ${a.name} dan ${b.name} membuat ${dealLabel(token.dealType).toLowerCase()} pada ronda ${token.round}. ${a.name} didenda ${cost(result.initiator) || 'satu penalti'}${result.initiator.skipTurns ? ` dan langkau ${result.initiator.skipTurns} giliran` : ''}; ${b.name} didenda ${cost(result.recipient) || 'satu penalti'}${result.recipient.skipTurns ? ` dan langkau ${result.recipient.skipTurns} giliran` : ''}. Kedua-duanya +20% Skandal.`,
+    feedText: `🗂️ Fail 101: ${a.name} dan ${b.name} didedahkan!`,
+    feedType: 'news',
+  });
+  notifyPlayer(player.id, 'ability-result', { abilityId: 'follow', ok: true, success: true, tokenId: token.id });
+  [a, b].forEach((p) => {
+    const lost = p.id === a.id ? result.initiator : result.recipient;
+    announceShieldUse(p, lost);
+    maybeCompleteObjective(p);
+  });
+  maybeCompleteObjective(player);
+  broadcastMatchUpdate();
+}
+
+// ---------- Media Trial ----------
+const trials = new Map(); // trialId -> { journalistId, accusedId, claimedId, timer }
+let trialSeq = 0;
+
+function clearTrials() {
+  trials.forEach((t) => clearTimeout(t.timer));
+  trials.clear();
+}
+
+function useMediaTrial({ players, player, payload, reject, abilityId }) {
+  const use = checkSpecialUse(player, abilityId);
+  if (!use.ok) return reject(use.reason);
+  const accused = players.find((p) => p.id === payload?.targetId);
+  if (!accused || accused.id === player.id) return reject('invalid-target');
+  if (!isCharacterId(payload?.characterId)) return reject('invalid-character');
+  if (accused.revealedCharacter) return reject('already-revealed');
+  if ([...trials.values()].some((t) => t.accusedId === accused.id)) return reject('trial-pending');
+
+  spendSpecial(player, abilityId);
+  trialSeq += 1;
+  const trialId = `trial-${trialSeq}`;
+  const claimed = getCharacter(payload.characterId);
+  const trial = {
+    journalistId: player.id,
+    accusedId: accused.id,
+    claimedId: claimed.id,
+    timer: setTimeout(() => settleMediaTrial(trialId, false), GAME_BALANCE.characters.mediaTrial.responseMs),
+  };
+  trials.set(trialId, trial);
+  notifyPlayer(player.id, 'ability-result', { abilityId, ok: true, targetId: accused.id, trialId, pending: true });
+  notifyPlayer(accused.id, 'media-trial', {
+    trialId,
+    text: `Seorang wartawan menuduh anda sebagai ${claimed.name}. Akui atau cabar?`,
+    claimedId: claimed.id,
+    claimedName: claimed.name,
+  });
+  // A bot answers at once and honestly: it admits what is true, challenges what is not.
+  if (accused.isBot) settleMediaTrial(trialId, characterIdOf(accused) === claimed.id);
+  broadcastMatchUpdate();
+}
+
+function settleMediaTrial(trialId, admit) {
+  const trial = trials.get(trialId);
+  if (!trial) return;
+  clearTimeout(trial.timer);
+  trials.delete(trialId);
+  const players = room.getPlayersLive();
+  const journalist = players.find((p) => p.id === trial.journalistId);
+  const accused = players.find((p) => p.id === trial.accusedId);
+  if (!journalist || !accused || matchOver) return;
+
+  const result = resolveMediaTrial(journalist, accused, trial.claimedId, admit, players);
+  const claimed = getCharacter(trial.claimedId);
+  if (result.correct) {
+    accused.revealedCharacter = claimed.id; // public from now on
+    postNews({
+      icon: '🎙️',
+      headline: 'WATAK RAHSIA DIBONGKAR',
+      description: `Perbicaraan media: ${accused.name} dikenal pasti sebagai ${claimed.name}${admit ? ' selepas mengakuinya' : ' walaupun menafikannya'}. ${accused.name} hilang ${result.accusedTrust}% kepercayaan awam.`,
+      feedText: `🎙️ ${accused.name} ialah ${claimed.name}!`,
+      feedType: 'news',
+    });
+    notifyPlayer(journalist.id, 'ability-notice', { kind: 'trial-won', text: `Tuduhan anda betul. +${result.journalistInfluence} Influence.` });
+  } else {
+    notifyPlayer(journalist.id, 'ability-notice', {
+      kind: 'trial-lost',
+      text: `Tuduhan anda salah. Anda hilang ${formatMoney(result.defamation.money)} dan ${result.defamation.trust}% kepercayaan awam.`,
+    });
+    notifyPlayer(accused.id, 'ability-notice', { kind: 'trial-cleared', text: 'Tuduhan terhadap anda terbukti salah.' });
+    announceShieldUse(journalist, result.defamation);
+  }
+  maybeCompleteObjective(journalist);
+  broadcastMatchUpdate();
+}
+
+function hostRespondTrial(responderId, trialId, admit) {
+  const trial = trials.get(trialId);
+  if (!trial || trial.accusedId !== responderId) return;
+  settleMediaTrial(trialId, Boolean(admit));
 }
 
 // The Clean Politician's special: answer an offer by exposing it instead of
@@ -958,6 +1152,12 @@ function hostRespondToDeal(responderId, dealId, accept) {
     upfront: result.upfront || null,
     held: result.held || null,
   };
+  // The Whistleblower's Deal Alert: told that a deal was accepted, never by whom.
+  if (charactersMode) {
+    players.filter((p) => characterIdOf(p) === 'whistleblower' && p.id !== result.offererId && p.id !== result.targetId).forEach((p) => {
+      notifyPlayer(p.id, 'ability-notice', { kind: 'deal-alert', text: 'Sebuah Backroom Deal baharu telah diterima.' });
+    });
+  }
   // What a character power paid out on this deal is for the offerer's eyes only.
   notifyPlayer(result.offererId, 'deal-result', { ...detail, role: 'offerer', otherId: result.targetId, perk: result.perk || null });
   notifyPlayer(result.targetId, 'deal-result', { ...detail, role: 'target', otherId: result.offererId });
@@ -1114,6 +1314,8 @@ function handleHostMatchMessage(type, payload, conn) {
     hostProposeDeal(conn.peer, payload?.targetId, payload?.money || 0, payload?.influence || 0, payload?.condition, respond, payload?.special || null);
   } else if (type === 'deal-expose-offer') {
     hostExposeOffer(conn.peer, payload?.dealId, respond);
+  } else if (type === 'trial-respond') {
+    hostRespondTrial(conn.peer, payload?.trialId, payload?.admit);
   } else if (type === 'ability-use') {
     hostUseAbility(conn.peer, payload?.abilityId, payload, respond);
   } else if (type === 'deal-respond') {
@@ -1209,6 +1411,8 @@ function handleClientMatchMessage(type, payload) {
     bus.emit('match:ability-result', payload);
   } else if (type === 'ability-notice') {
     bus.emit('match:ability-notice', payload);
+  } else if (type === 'media-trial') {
+    bus.emit('match:media-trial', payload);
   } else if (type === 'deal-contract-event') {
     bus.emit('match:deal-contract-event', payload);
   } else if (type === 'deal-chat') {
@@ -1343,6 +1547,12 @@ export function exposeBackroomOffer(dealId) {
 
 // Mode Watak: use a character special that is not a deal (Lawyer, Ally ...).
 // `params` is whatever that special needs, e.g. { targetId }.
+// Mode Watak: the accused answers a Media Trial (admit or challenge).
+export function respondToMediaTrial(trialId, admit) {
+  if (isHostRole()) hostRespondTrial(room.getRoomSnapshot().localPlayerId, trialId, admit);
+  else multiplayer.send({ type: 'trial-respond', payload: { trialId, admit } });
+}
+
 export function useAbility(abilityId, params = {}) {
   if (isHostRole()) {
     hostUseAbility(room.getRoomSnapshot().localPlayerId, abilityId, params, (msg) => {
@@ -1504,6 +1714,7 @@ export function resetMatch() {
   turnSkipping = false;
   advancedMode = false;
   charactersMode = false;
+  clearTrials();
   specialTurnKey = null;
   marketStock = [];
   passivePayout = null;

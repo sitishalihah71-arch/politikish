@@ -23,6 +23,7 @@ import { validateSabotaj } from './sabotage.js';
 import { applyScandalDelta, demoteOneRank } from './effects.js';
 import { recordAcceptedDeal, applyExposedBeforeAccept, markContractExposed, resetEvidence } from './evidence.js';
 import { applyFixerPerk, applyFundingBonus } from './abilities.js';
+import { resetInvestigations } from './investigation.js';
 
 const cfg = GAME_BALANCE.backroomDeals;
 
@@ -471,4 +472,5 @@ export function resetDeals() {
   pendingDeals.clear();
   contracts = [];
   resetEvidence();
+  resetInvestigations();
 }
