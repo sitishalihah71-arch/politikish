@@ -325,7 +325,10 @@ GAME_BALANCE.bots.turnDelayMs = 0;
         ok(tokens.every((t) => slots.has(t.initiatorSlot) && slots.has(t.recipientSlot) && t.initiatorSlot !== t.recipientSlot), `${n}p seed ${seed}: tokens point at two different seated players`);
         ok(tokens.every((t) => t.value.money >= 0 && t.value.influence >= 0 && t.value.money + t.value.influence > 0), `${n}p seed ${seed}: token values sane`);
         ok(tokens.every((t) => t.round >= 1 && t.round <= rounds), `${n}p seed ${seed}: token rounds in range`);
-        ok(tokens.every((t) => !t.exposed || t.contractId !== null), `${n}p seed ${seed}: only a Dedahkan (a contract) has exposed a token`);
+        // Since phase 4 the bots play their characters, so a Whistleblower / Journalist (or a copy of
+        // one) may legitimately expose a token outside any contract. Without one, only a Dedahkan can.
+        const investigators = g.players.some((p) => ['whistleblower', 'journalist'].includes(p.character?.copiedId || p.character?.id) || p.character?.id === 'opportunist');
+        ok(investigators || tokens.every((t) => !t.exposed || t.contractId !== null), `${n}p seed ${seed}: only a Dedahkan (a contract) has exposed a token`);
         ok(g.players.every((p) => p.scandal >= 0 && p.scandal <= 100), `${n}p seed ${seed}: Scandal in range`);
         ok(g.players.every((p) => p.approval >= 0 && p.approval <= 100), `${n}p seed ${seed}: Public Trust in range`);
         ok(g.players.every((p) => p.skipNextTurn === false || p.skipNextTurn === undefined || p.skipNextTurn > 0), `${n}p seed ${seed}: skip counter is false or positive`);

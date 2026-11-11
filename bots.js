@@ -11,6 +11,7 @@ import { validatePolitik } from './politics.js';
 import { validateSabotaj } from './sabotage.js';
 import { validateMedia } from './media.js';
 import { validateRaid, validateMarketPurchase } from './politicalOpportunities.js';
+import { SPY_CATEGORIES } from './investigation.js';
 
 const { bots: cfg } = GAME_BALANCE;
 
@@ -143,8 +144,9 @@ export function decideBotAction(bot, players, offers, plan = {}) {
 
 // null when the roll misses, no rival exists, or the bot has nothing it
 // can spare - resolveBotTurn treats null as "don't propose this turn".
+// `ctx.force` skips the dice (a bot that has decided to start a special deal).
 export function decideDealProposal(bot, players, ctx = {}) {
-  if (Math.random() * 100 >= cfg.actionWeights.dealPropose) return null;
+  if (!ctx.force && Math.random() * 100 >= cfg.actionWeights.dealPropose) return null;
 
   const rivals = players.filter((p) => p.id !== bot.id);
   if (!rivals.length) return null;
@@ -167,6 +169,95 @@ export function decideDealProposal(bot, players, ctx = {}) {
   else if (roll < 0.6 && botNext && getNextRank(target.rank) === botNext) condition = { type: 'nopolitik' };
 
   return { targetId: target.id, money, influence, condition };
+}
+
+// ---------- Mode Watak: what a bot does with its character ----------
+
+const chance = (pct) => Math.random() * 100 < pct;
+
+// Specials are free, so a bot takes at most one before its normal action.
+// `ctx` is built by match.js from the live host state:
+//   characterId, round, ready(abilityId), blocked(target), canFalsify(targetId),
+//   copyOptions[], endorsement ({ targetSlot, renewed } | null), campaignCost,
+//   revealedIds (Set of character ids already public), trialPendingIds (Set of player ids),
+//   deckIds[], hasShield.
+// Returns null, { kind: 'deal', special }, or
+// { abilityId, payload, follow? } - follow: also publish/expose what was found.
+// Every plan is built only from things the host has already said are allowed.
+export function decideBotSpecial(bot, players, ctx) {
+  const c = cfg.character;
+  const rivals = players.filter((p) => p.id !== bot.id);
+  if (!rivals.length) return null;
+  const any = () => randomChoice(rivals);
+  const suspect = () => weightedPick(rivals.map((p) => ({ p, weight: 1 + p.scandal / 10 }))).p;
+
+  switch (ctx.characterId) {
+    case 'fixer':
+      return ctx.ready('special') && chance(c.dealSpecialChance) ? { kind: 'deal', special: 'fixer' } : null;
+    case 'moneyMan':
+      return ctx.ready('special') && chance(c.dealSpecialChance) ? { kind: 'deal', special: 'funding' } : null;
+    case 'spy':
+      return ctx.ready('special') && chance(c.useChance)
+        ? { abilityId: 'special', payload: { targetId: suspect().id, category: randomChoice(SPY_CATEGORIES) } }
+        : null;
+    case 'whistleblower':
+      return ctx.ready('special') && chance(c.useChance)
+        ? { abilityId: 'special', payload: { targetId: suspect().id }, follow: true }
+        : null;
+    case 'journalist': {
+      if (!ctx.ready('special.report') || !chance(c.useChance)) return null;
+      if (ctx.ready('special.mediaTrial') && chance(c.mediaTrialChance)) {
+        const accusable = rivals.filter((p) => !p.revealedCharacter && !ctx.trialPendingIds.has(p.id));
+        const names = ctx.deckIds.filter((id) => id !== ctx.characterId && !ctx.revealedIds.has(id));
+        if (accusable.length && names.length) {
+          return { abilityId: 'special.mediaTrial', payload: { targetId: randomChoice(accusable).id, characterId: randomChoice(names) } };
+        }
+      }
+      return { abilityId: 'special.report', payload: { targetId: suspect().id }, follow: true };
+    }
+    case 'bureaucrat': {
+      if (!ctx.ready('special') || !chance(c.falsifyChance)) return null;
+      const targets = rivals.filter((p) => !ctx.blocked(p) && ctx.canFalsify(p.id));
+      return targets.length ? { abilityId: 'special', payload: { targetId: randomChoice(targets).id } } : null;
+    }
+    case 'lawyer':
+      return ctx.ready('special') && !ctx.hasShield && !ctx.blocked(bot) && chance(c.shieldChance)
+        ? { abilityId: 'special', payload: { targetId: bot.id } }
+        : null;
+    case 'ally': {
+      if (!ctx.ready('special') || !chance(c.allyChance)) return null;
+      const targets = rivals.filter((p) => !ctx.blocked(p));
+      return targets.length ? { abilityId: 'special', payload: { targetId: randomChoice(targets).id } } : null;
+    }
+    case 'populist':
+      return ctx.ready('special') && bot.money >= ctx.campaignCost + c.campaignBuffer && chance(c.campaignChance)
+        ? { abilityId: 'special', payload: {} }
+        : null;
+    case 'opportunist':
+      return ctx.round >= 2 && ctx.copyOptions.length && ctx.ready('special') && chance(c.copyChance)
+        ? { abilityId: 'special', payload: { characterId: randomChoice(ctx.copyOptions) } }
+        : null;
+    case 'kingmaker': {
+      // Bonus Voting Power stays unused: bots do not vote.
+      if (ctx.endorsement) {
+        const endorsed = players.find((p) => p.slot === ctx.endorsement.targetSlot);
+        if (!ctx.ready('special.withdrawRenew')) return null;
+        if (endorsed && endorsed.scandal >= c.withdrawScandal && chance(50)) return { abilityId: 'special.withdrawRenew', payload: { mode: 'withdraw' } };
+        if (!ctx.endorsement.renewed && chance(c.renewChance)) return { abilityId: 'special.withdrawRenew', payload: { mode: 'renew' } };
+        return null;
+      }
+      if (ctx.ready('special.endorsement') && bot.influence >= 300 + c.brokerMinInfluence / 2 && chance(c.endorseChance)) {
+        return { abilityId: 'special.endorsement', payload: { targetId: any().id } };
+      }
+      if (ctx.ready('special.powerBroker') && bot.influence >= c.brokerMinInfluence && chance(c.useChance)) {
+        const amount = 250 + 50 * Math.floor(Math.random() * 6); // 250-500
+        return { abilityId: 'special.powerBroker', payload: { targetId: any().id, amount } };
+      }
+      return null;
+    }
+    default:
+      return null;
+  }
 }
 
 // A clean deal never hurts the recipient, so a bot gets more willing to

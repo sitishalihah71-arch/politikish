@@ -260,8 +260,8 @@ console.log('3. Endorsements');
   eq(km.influence, 1000, 'Kingmaker +100 x3');
   eq(tg.influence, 600, 'endorsed +100 x3');
   const gone = man.startOfRound(6, players);
-  ok(gone.endorsementExpired && gone.endorsementPaid.length === 0, 'expires at round 6, nothing paid');
-  eq(man.endorsementView(players), null, 'and is gone');
+  ok(gone.endorsementExpired.length === 1 && gone.endorsementPaid.length === 0, 'expires at round 6, nothing paid');
+  eq(man.endorsementView(players).length, 0, 'and is gone');
   man.resetManeuvers();
 }
 {
@@ -283,7 +283,7 @@ console.log('3. Endorsements');
   eq(fx.influence, 300, 'received 300');
   eq(fx.approval, 52, '+2% Public Trust');
   eq(snap().pendingNews?.headline, 'SOKONGAN RASMI', 'announced publicly');
-  const pub = lastOf(t.clients[2], 'match-update')?.shadow?.endorsement;
+  const pub = lastOf(t.clients[2], 'match-update')?.shadow?.endorsements?.[0];
   ok(pub && pub.kingmakerId === km.id && pub.targetId === fx.id && pub.expiresRound === round0 + 3, 'everyone sees who endorsed whom, and until when');
   act(t, 1, 'special.withdrawRenew', { mode: 'renew' });
   await wait(5);
@@ -298,7 +298,7 @@ console.log('3. Endorsements');
   act(t, 1, 'special.withdrawRenew', { mode: 'renew' });
   await wait(10);
   eq(snap().round, round0 + 1, 'sanity: next round');
-  eq(lastOf(t.clients[2], 'match-update').shadow.endorsement.expiresRound, round0 + 6, 'renewal adds 3 rounds');
+  eq(lastOf(t.clients[2], 'match-update').shadow.endorsements[0].expiresRound, round0 + 6, 'renewal adds 3 rounds');
   await t.next(1);
   act(t, 1, 'special.withdrawRenew', { mode: 'renew' });
   await wait(5);
@@ -307,7 +307,7 @@ console.log('3. Endorsements');
   eq(notices(t.clients[0], 'endorsement-pay'), 6, 'Kingmaker paid in each of the 6 rounds');
   eq(notices(t.clients[1], 'endorsement-pay'), 6, 'endorsed player too');
   eq(notices(t.clients[0], 'endorsement-expired'), 1, 'expiry told once');
-  eq(lastOf(t.clients[2], 'match-update').shadow.endorsement, null, 'public endorsement cleared');
+  eq(lastOf(t.clients[2], 'match-update').shadow.endorsements.length, 0, 'public endorsement cleared');
   teardown();
 }
 {
@@ -325,7 +325,7 @@ console.log('3. Endorsements');
   eq(fx.approval, 48, 'withdrawn: the endorsed player loses 2%');
   eq(snap().pendingNews?.headline, 'SOKONGAN DITARIK BALIK', 'announced publicly');
   eq(km.influence, kmInf, 'no refund');
-  eq(lastOf(t.clients[2], 'match-update').shadow.endorsement, null, 'gone from the public view');
+  eq(lastOf(t.clients[2], 'match-update').shadow.endorsements.length, 0, 'gone from the public view');
   await t.next(1);
   act(t, 1, 'special.withdrawRenew', { mode: 'renew' });
   await wait(5);
@@ -337,6 +337,23 @@ console.log('3. Endorsements');
   for (let i = 0; i < 8; i += 1) await t.pass();
   eq(notices(t.clients[0], 'endorsement-pay'), paidBefore, 'nothing is paid after a withdrawal');
   teardown();
+}
+
+{
+  // An Opportunist who copied the Kingmaker makes two Kingmakers: each has their own endorsement
+  const k1 = fake(1, { character: { id: 'kingmaker' } });
+  const k2 = fake(2, { character: { id: 'opportunist', copiedId: 'kingmaker' } });
+  const a = fake(3); const b = fake(4);
+  const players = [k1, k2, a, b];
+  ok(man.startEndorsement(k1, a, 1).ok && man.startEndorsement(k2, b, 1).ok, 'two Kingmakers can each endorse');
+  eq(man.endorsementView(players).length, 2, 'both are public');
+  eq(man.startEndorsement(k2, a, 1).reason, 'endorsement-active', 'but each has only one at a time');
+  const out = man.reactToExposure([b], players);
+  eq(out.liabilities.length, 1, 'exposing one endorsed player only hurts their own Kingmaker');
+  eq(out.liabilities[0].kingmakerId, k2.id, 'the right one');
+  ok(man.withdrawEndorsement(k1, players).ok, 'withdrawing one leaves the other');
+  eq(man.endorsementView(players).length, 1, 'one remains');
+  man.resetManeuvers();
 }
 
 // ---------- 4. Political Liability ----------
@@ -402,9 +419,9 @@ console.log('4. Political Liability');
   const other = fake(3);
   const players = [km, tg, other];
   man.startEndorsement(km, tg, 1);
-  eq(man.reactToExposure([other], players).liability, null, 'someone else exposed: nothing');
+  eq(man.reactToExposure([other], players).liabilities.length, 0, 'someone else exposed: nothing');
   man.startOfRound(5, players);
-  eq(man.reactToExposure([tg], players).liability, null, 'expired endorsement: nothing');
+  eq(man.reactToExposure([tg], players).liabilities.length, 0, 'expired endorsement: nothing');
   man.resetManeuvers();
 }
 

@@ -380,5 +380,25 @@ export const GAME_BALANCE = {
     },
     dealOfferPercent: 20,
     dealAcceptMinValue: 300,
+    // Mode Watak (bots.js decideBotSpecial): chances are per own turn, in %.
+    // A bot never uses a power that is on cooldown, cannot be paid for or would
+    // be refused, so none of these can leave its turn stuck.
+    character: {
+      useChance: 55, // an investigator / defender / broker uses a ready power
+      dealSpecialChance: 45, // Fixer / Money Man starts a special deal when ready
+      exposeOfferChance: 60, // a Clean Politician answers an offer by exposing it
+      followChance: 80, // publishes / exposes what an investigation found
+      mediaTrialChance: 8, // a Journalist gambles on naming a character
+      falsifyChance: 25,
+      shieldChance: 40,
+      allyChance: 25,
+      copyChance: 50,
+      campaignChance: 60,
+      campaignBuffer: 3000, // money a Populist keeps after the cost
+      brokerMinInfluence: 600,
+      endorseChance: 30,
+      renewChance: 30,
+      withdrawScandal: 60, // withdraw support once the endorsed player is this compromised
+    },
   },
 };

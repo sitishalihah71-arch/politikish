@@ -17,17 +17,17 @@ import { bus, formatMoney } from './utils.js';
 import * as room from './room.js';
 import * as multiplayer from './multiplayer.js';
 import { RANKS, initMatchState, stripPrivateFields } from './player.js';
-import { dealCharacters, getCharacter, checkAbilityUse, markAbilityUsed, copyableCharacterIds, copyCharacter } from './characters.js';
+import { dealCharacters, getCharacter, getDeck, checkAbilityUse, markAbilityUsed, copyableCharacterIds, copyCharacter } from './characters.js';
 import { characterIdOf, armShield, claimIntegrityBonus } from './abilities.js';
-import { exposeToken } from './evidence.js';
+import { exposeToken, getTokens } from './evidence.js';
 import {
-  falsify, rollInvestigation, spyReport, SPY_CATEGORIES, buildFullViews, getView, dropViews, hiddenTokenCount,
+  falsify, rollInvestigation, spyReport, SPY_CATEGORIES, buildFullViews, getView, dropViews, hiddenTokenCount, listViewIds, isFalsified,
   applyForgedReportPenalty, resolveMediaTrial, isCharacterId, dealLabel,
 } from './investigation.js';
 import { applyScandalPenalty, tickPublicSupport, consumeSkipTurn, applyApprovalDelta, adjustBalance } from './effects.js';
 import {
   powerBroker, startEndorsement, withdrawEndorsement, renewEndorsement, endorsementView, startOfRound,
-  armBonusVote, voteWeight, closeBonusVotes, runCampaign, reactToExposure, resetManeuvers,
+  armBonusVote, voteWeight, closeBonusVotes, runCampaign, reactToExposure, resetManeuvers, endorsementFor, campaignCost,
 } from './maneuvers.js';
 import {
   advanceShadowEvents, shadowEventView, investigationModifiers, freeInvestigationAvailable, claimFreeInvestigation,
@@ -48,7 +48,7 @@ import {
 import { recordMessage, getTranscript, resetChats } from './backroomChat.js';
 import { PARLIAMENT_MOTIONS, pickMotion, applyMotion } from './parliament.js';
 import { assignSecretObjective, checkSecretObjective } from './objectives.js';
-import { decideBotAction, decideDealProposal, decideDealResponse, pickBotChatReply } from './bots.js';
+import { decideBotAction, decideDealProposal, decideDealResponse, decideBotSpecial, pickBotChatReply } from './bots.js';
 import { GAME_BALANCE } from './balance.js';
 
 let matchStarted = false;
@@ -134,7 +134,7 @@ let clientRevealGate = null; // clients: { waitingIds } as last broadcast
 let clientShadow = null;
 function shadowView(players) {
   if (!charactersMode) return null;
-  return { event: shadowEventView(), endorsement: endorsementView(players) };
+  return { event: shadowEventView(), endorsements: endorsementView(players) };
 }
 
 function revealGateView() {
@@ -552,6 +552,50 @@ function maybeTriggerBotTurn(active) {
 // same hostResolveX a real client's message would have driven. A deal
 // proposal never consumes the turn (see the comment on hostProposeDeal
 // below), so a bot may propose one and still take a normal action after.
+// What the bot-driven specials were refused for (a test hook: a refusal never
+// blocks a turn because specials are free, but a bot should not ask for what it
+// cannot have, so the soak test counts these and expects none).
+export const botDiagnostics = { rejected: [], used: {} };
+
+// Mode Watak: builds the bot's view of what is possible (only things the host
+// already allows), asks bots.js what to do, and does it. Returns a deal plan
+// ({ kind: 'deal', special }) for the caller to carry out, otherwise null.
+function botCharacterTurn(bot, players) {
+  if (!bot.character) return null;
+  const id = characterIdOf(bot);
+  const free = freeInvestigationAvailable(bot);
+  const investigates = (abilityId) => abilityId === 'special.report' || (abilityId === 'special' && (id === 'spy' || id === 'whistleblower'));
+  const ctx = {
+    characterId: id,
+    round: currentRound,
+    ready: (abilityId) => checkSpecialUse(bot, abilityId, { free: free && investigates(abilityId) }).ok,
+    blocked: (target) => inquiryBlocks(bot, target),
+    canFalsify: (targetId) => {
+      const target = players.find((p) => p.id === targetId);
+      return Boolean(target) && !isFalsified(target.slot) && !getTokens().some((t) => (t.initiatorSlot === bot.slot && t.recipientSlot === target.slot) || (t.recipientSlot === bot.slot && t.initiatorSlot === target.slot));
+    },
+    copyOptions: copyableCharacterIds(bot, players),
+    endorsement: endorsementFor(bot.slot),
+    campaignCost: campaignCost(bot),
+    revealedIds: new Set(players.map((p) => p.revealedCharacter).filter(Boolean)),
+    trialPendingIds: new Set([...trials.values()].map((t) => t.accusedId)),
+    deckIds: getDeck(players.length).map((c) => c.id),
+    hasShield: (bot.abilityState?.shields || []).length > 0,
+  };
+  const plan = decideBotSpecial(bot, players, ctx);
+  if (!plan) return null;
+  if (plan.kind === 'deal') return plan;
+
+  const refused = (abilityId) => (msg) => botDiagnostics.rejected.push({ id, abilityId, reason: msg.payload.reason, round: currentRound });
+  botDiagnostics.used[id] = (botDiagnostics.used[id] || 0) + 1;
+  hostUseAbility(bot.id, plan.abilityId, plan.payload, refused(plan.abilityId));
+  if (plan.follow && Math.random() * 100 < GAME_BALANCE.bots.character.followChance) {
+    const viewId = listViewIds(bot.slot, turnKey())[0];
+    if (viewId) hostUseAbility(bot.id, 'follow', { viewId }, refused('follow'));
+  }
+  return null;
+}
+
 function resolveBotTurn(botId) {
   const players = room.getPlayersLive();
   const bot = players.find((p) => p.id === botId);
@@ -563,8 +607,14 @@ function resolveBotTurn(botId) {
   });
 
   const voteAhead = Boolean(getNextVoteRound(currentRound, maxRounds, room.getRoomSnapshot().settings.parliamentVoting));
-  const proposal = decideDealProposal(bot, players, { voteAhead });
-  if (proposal) hostProposeDeal(bot.id, proposal.targetId, proposal.money, proposal.influence, proposal.condition, () => {});
+  // Mode Watak: the bot may spend its character's special first (free, one per turn).
+  const special = charactersMode ? botCharacterTurn(bot, players) : null;
+  // The Lawyer can never start a deal, so a Lawyer bot does not try.
+  const noDeals = charactersMode && characterIdOf(bot) === 'lawyer';
+  const proposal = noDeals ? null : decideDealProposal(bot, players, { voteAhead, force: Boolean(special) });
+  if (proposal) {
+    hostProposeDeal(bot.id, proposal.targetId, proposal.money, proposal.influence, proposal.condition, () => {}, special ? special.special : null);
+  }
 
   const offers = {
     projekOffers: generateProjectOffers(),
@@ -816,6 +866,11 @@ function hostProposeDeal(offererId, targetId, money, influence, condition, respo
   // accept/reject decision is driven directly instead. It turns down a
   // "Sabotaj X" it couldn't carry out.
   if (target.isBot) {
+    // A Clean Politician bot often answers by exposing the offer instead.
+    if (charactersMode && characterIdOf(target) === 'cleanPolitician' && Math.random() * 100 < GAME_BALANCE.bots.character.exposeOfferChance) {
+      hostExposeOffer(target.id, result.dealId, () => {});
+      return;
+    }
     const victim = players.find((p) => p.id === result.condition.victimId);
     const canComply = result.condition.type !== 'sabotage'
       || (victim && validateSabotaj(target, victim, players, 0, { isKabel: Boolean(target.hasKabel) }).ok);
@@ -1036,13 +1091,12 @@ function announceExposure(exposedPlayers, players) {
   out.populist.forEach((x) => {
     notifyPlayer(x.id, 'ability-notice', { kind: 'scandal-damage', text: `Skandal Damage: anda hilang ${x.trust}% kepercayaan awam tambahan.` });
   });
-  if (out.liability) {
-    const l = out.liability;
+  out.liabilities.forEach((l) => {
     notifyPlayer(l.kingmakerId, 'ability-notice', {
       kind: 'political-liability',
       text: `Political Liability: pemain yang anda sokong terdedah. Anda hilang ${l.trust}% kepercayaan awam dan ${l.influence} Influence.`,
     });
-  }
+  });
 }
 
 // ---------- Kingmaker, Populist, Opportunist (Mode Watak) ----------
@@ -1169,12 +1223,11 @@ function runCharacterRoundStart(round, players) {
   out.endorsementPaid.forEach((x) => {
     notifyPlayer(x.id, 'ability-notice', { kind: 'endorsement-pay', text: `Sokongan rasmi: +${x.influence} Influence.` });
   });
-  if (out.endorsementExpired) {
-    const { kingmakerId, targetId } = out.endorsementExpired;
+  out.endorsementExpired.forEach(({ kingmakerId, targetId }) => {
     [kingmakerId, targetId].filter(Boolean).forEach((id) => {
       notifyPlayer(id, 'ability-notice', { kind: 'endorsement-expired', text: 'Sokongan rasmi telah tamat.' });
     });
-  }
+  });
   out.populist.forEach((x) => {
     notifyPlayer(x.id, 'ability-notice', { kind: 'public-support', text: `Public Support: +${x.trust}% kepercayaan awam.` });
   });

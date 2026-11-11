@@ -134,6 +134,12 @@ export function getView(viewerSlot, viewId, turnKey) {
   return { ...v };
 }
 
+// The ids of the views `viewerSlot` can act on this turn (a bot publishes one;
+// it cannot tell a genuine view from a forged one, just like a person).
+export function listViewIds(viewerSlot, turnKey) {
+  return [...views.entries()].filter(([, v]) => v.viewerSlot === viewerSlot && v.turnKey === turnKey).map(([id]) => id);
+}
+
 export function dropViews(viewerSlot) {
   views.forEach((v, id) => { if (v.viewerSlot === viewerSlot) views.delete(id); });
 }

@@ -16,12 +16,14 @@ import { characterIdOf } from './abilities.js';
 const kcfg = GAME_BALANCE.characters.kingmaker;
 const pcfg = GAME_BALANCE.characters.populist;
 
-let endorsement = null; // the current one: { kingmakerSlot, targetSlot, expiresRound, renewed, liabilityDone }
+// Each Kingmaker has at most one endorsement at a time. Normally there is one
+// Kingmaker, but an Opportunist can copy the card, so this is keyed by slot.
+let endorsements = new Map(); // kingmakerSlot -> { kingmakerSlot, targetSlot, expiresRound, renewed, liabilityDone }
 let bonusVoters = new Set(); // slots that armed Bonus Voting Power for the open vote
 let exposedSlots = new Set(); // everyone who has been confirmed exposed this match
 
 export function resetManeuvers() {
-  endorsement = null;
+  endorsements = new Map();
   bonusVoters = new Set();
   exposedSlots = new Set();
 }
@@ -41,82 +43,91 @@ export function powerBroker(kingmaker, target, amount) {
 
 // ---------- Kingmaker: endorsements ----------
 
-export const hasActiveEndorsement = () => Boolean(endorsement);
+export const hasActiveEndorsement = () => endorsements.size > 0;
 
 // The endorsement is active from the moment it is made until it expires or is
 // withdrawn (then there is none). `round` is the round it is made in: it pays
 // at the start of each of the next `endorsementRounds` rounds.
 // reason codes: 'endorsement-active' | 'insufficient-influence'
 export function startEndorsement(kingmaker, target, round) {
-  if (endorsement) return { ok: false, reason: 'endorsement-active' };
+  if (endorsements.has(kingmaker.slot)) return { ok: false, reason: 'endorsement-active' };
   if (!(kingmaker.influence >= kcfg.endorsementCost)) return { ok: false, reason: 'insufficient-influence' };
   adjustBalance(kingmaker, 'influence', -kcfg.endorsementCost);
   adjustBalance(target, 'influence', kcfg.endorsementCost);
   const before = target.approval;
   applyApprovalDelta(target, kcfg.endorsementTrust);
-  endorsement = {
+  const made = {
     kingmakerSlot: kingmaker.slot,
     targetSlot: target.slot,
     expiresRound: round + kcfg.endorsementRounds,
     renewed: false,
     liabilityDone: false,
   };
-  return { ok: true, trust: target.approval - before, expiresRound: endorsement.expiresRound };
+  endorsements.set(kingmaker.slot, made);
+  return { ok: true, trust: target.approval - before, expiresRound: made.expiresRound };
 }
 
 // reason codes: 'no-endorsement'
 export function withdrawEndorsement(kingmaker, players) {
-  if (!endorsement || endorsement.kingmakerSlot !== kingmaker.slot) return { ok: false, reason: 'no-endorsement' };
+  const endorsement = endorsements.get(kingmaker.slot);
+  if (!endorsement) return { ok: false, reason: 'no-endorsement' };
   const target = players.find((p) => p.slot === endorsement.targetSlot);
   const before = target ? target.approval : 0;
   if (target) applyApprovalDelta(target, -kcfg.withdrawTrust);
-  endorsement = null; // withdrawn: gone for good, no refund, cannot be renewed
+  endorsements.delete(kingmaker.slot); // withdrawn: gone for good, no refund, cannot be renewed
   return { ok: true, target, trust: target ? before - target.approval : 0 };
 }
 
 // One renewal per endorsement, only while it is active.
 // reason codes: 'no-endorsement' | 'already-renewed'
 export function renewEndorsement(kingmaker) {
-  if (!endorsement || endorsement.kingmakerSlot !== kingmaker.slot) return { ok: false, reason: 'no-endorsement' };
+  const endorsement = endorsements.get(kingmaker.slot);
+  if (!endorsement) return { ok: false, reason: 'no-endorsement' };
   if (endorsement.renewed) return { ok: false, reason: 'already-renewed' };
   endorsement.renewed = true;
   endorsement.expiresRound += kcfg.endorsementRounds;
   return { ok: true, expiresRound: endorsement.expiresRound };
 }
 
+// The Kingmaker's own endorsement, for a bot deciding whether to renew or
+// withdraw: { targetSlot, renewed } or null.
+export function endorsementFor(kingmakerSlot) {
+  const e = endorsements.get(kingmakerSlot);
+  return e ? { targetSlot: e.targetSlot, renewed: e.renewed } : null;
+}
+
 // What everyone may see (the endorsement is announced publicly).
 export function endorsementView(players) {
-  if (!endorsement) return null;
   const find = (slot) => players.find((p) => p.slot === slot);
-  return {
-    kingmakerId: find(endorsement.kingmakerSlot)?.id || null,
-    targetId: find(endorsement.targetSlot)?.id || null,
-    expiresRound: endorsement.expiresRound,
-  };
+  return [...endorsements.values()].map((e) => ({
+    kingmakerId: find(e.kingmakerSlot)?.id || null,
+    targetId: find(e.targetSlot)?.id || null,
+    expiresRound: e.expiresRound,
+  }));
 }
 
 // ---------- Start of a round ----------
 
 // Called once when a new round begins (never for round 1 or for a round after
 // the match). Returns what happened, for the host to announce:
-// { endorsementPaid: [{ id, influence }], endorsementExpired: { kingmakerId, targetId } | null,
+// { endorsementPaid: [{ id, influence }], endorsementExpired: [{ kingmakerId, targetId }],
 //   populist: [{ id, trust }] }
 export function startOfRound(round, players) {
-  const out = { endorsementPaid: [], endorsementExpired: null, populist: [] };
+  const out = { endorsementPaid: [], endorsementExpired: [], populist: [] };
 
-  if (endorsement) {
+  [...endorsements.values()].forEach((endorsement) => {
     const kingmaker = players.find((p) => p.slot === endorsement.kingmakerSlot);
     const target = players.find((p) => p.slot === endorsement.targetSlot);
     if (round > endorsement.expiresRound) {
-      out.endorsementExpired = { kingmakerId: kingmaker?.id || null, targetId: target?.id || null };
-      endorsement = null;
+      out.endorsementExpired.push({ kingmakerId: kingmaker?.id || null, targetId: target?.id || null });
+      endorsements.delete(endorsement.kingmakerSlot);
     } else {
       [kingmaker, target].forEach((p) => {
         if (!p) return;
         out.endorsementPaid.push({ id: p.id, influence: adjustBalance(p, 'influence', kcfg.endorsementPerRound) });
       });
     }
-  }
+  });
 
   players.forEach((p) => {
     if (characterIdOf(p) !== 'populist') return;
@@ -177,9 +188,9 @@ export const exposedSlotList = () => [...exposedSlots];
 //   - Populist: an extra -40% Public Trust, once per exposure;
 //   - Kingmaker: if the endorsed player is among them while the endorsement is
 //     active, -2% Public Trust and -500 Influence, once per endorsement.
-// Returns { populist: [{ id, trust }], liability: { kingmakerId, targetId, trust, influence } | null }.
+// Returns { populist: [{ id, trust }], liabilities: [{ kingmakerId, targetId, trust, influence }] }.
 export function reactToExposure(exposedPlayers, players) {
-  const out = { populist: [], liability: null };
+  const out = { populist: [], liabilities: [] };
   exposedPlayers.forEach((p) => exposedSlots.add(p.slot));
 
   exposedPlayers.forEach((p) => {
@@ -189,16 +200,16 @@ export function reactToExposure(exposedPlayers, players) {
     out.populist.push({ id: p.id, trust: before - p.approval });
   });
 
-  if (endorsement && !endorsement.liabilityDone && exposedPlayers.some((p) => p.slot === endorsement.targetSlot)) {
+  endorsements.forEach((endorsement) => {
+    if (endorsement.liabilityDone || !exposedPlayers.some((p) => p.slot === endorsement.targetSlot)) return;
     const kingmaker = players.find((p) => p.slot === endorsement.kingmakerSlot);
     const target = players.find((p) => p.slot === endorsement.targetSlot);
     endorsement.liabilityDone = true;
-    if (kingmaker) {
-      const before = kingmaker.approval;
-      applyApprovalDelta(kingmaker, -kcfg.liabilityTrust);
-      const lost = -adjustBalance(kingmaker, 'influence', -kcfg.liabilityInfluence);
-      out.liability = { kingmakerId: kingmaker.id, targetId: target?.id || null, trust: before - kingmaker.approval, influence: lost };
-    }
-  }
+    if (!kingmaker) return;
+    const before = kingmaker.approval;
+    applyApprovalDelta(kingmaker, -kcfg.liabilityTrust);
+    const lost = -adjustBalance(kingmaker, 'influence', -kcfg.liabilityInfluence);
+    out.liabilities.push({ kingmakerId: kingmaker.id, targetId: target?.id || null, trust: before - kingmaker.approval, influence: lost });
+  });
   return out;
 }
