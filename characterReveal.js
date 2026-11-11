@@ -60,6 +60,8 @@ function buildOverlay() {
   root.setAttribute('aria-modal', 'true');
   root.setAttribute('aria-label', 'Watak rahsia anda');
   root.innerHTML = `
+    <div class="cr-strip"><span>Akhbar Satira</span><span>Edisi Khas</span><span>Watak Rahsia</span></div>
+    <div class="cr-masthead">POLITIK<span>'ISH</span></div>
     <div class="cr-rays"></div>
     <div class="cr-aura"></div>
     <div class="cr-caption" aria-live="polite">
@@ -72,14 +74,11 @@ function buildOverlay() {
         <div class="cr-flipper">
           <div class="cr-face cr-back">
             <div class="cr-back-brand">POLITIK<span>'ISH</span></div>
-            <svg width="150" height="150" viewBox="0 0 150 150" aria-hidden="true">
-              <defs><linearGradient id="cr-gold" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f6dc8f"/><stop offset=".6" stop-color="#e0b04a"/><stop offset="1" stop-color="#a97a22"/></linearGradient></defs>
-              <circle cx="75" cy="75" r="70" fill="none" stroke="url(#cr-gold)" stroke-width="3"/>
-              <circle cx="75" cy="75" r="60" fill="none" stroke="#8a6420" stroke-width="1"/>
-              <circle cx="75" cy="75" r="64" fill="none" stroke="#8a6420" stroke-width="1" stroke-dasharray="2 6"/>
-              <text x="75" y="106" text-anchor="middle" font-family="Playfair Display, serif" font-style="italic" font-weight="900" font-size="88" fill="url(#cr-gold)">?</text>
-            </svg>
+            <div class="cr-back-bars" aria-hidden="true"><i></i><i></i><i></i></div>
+            <div class="cr-back-q" aria-hidden="true">?</div>
+            <div class="cr-back-bars" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
             <div class="cr-back-label">WATAK RAHSIA</div>
+            <div class="cr-stamp" aria-hidden="true">SULIT</div>
           </div>
           <div class="cr-face cr-front" id="cr-front"></div>
         </div>
@@ -95,6 +94,7 @@ function buildOverlay() {
       <p class="cr-hint" id="cr-hint">Rahsiakan watak anda. Hanya anda boleh melihat kad ini.</p>
     </div>
     <div class="cr-curtain">
+      <div class="cr-kicker">Stop Press</div>
       <div class="cr-deck" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
       <div class="cr-curtain-title">Watak anda sedang dipilih<span>.</span><span>.</span><span>.</span></div>
       <div class="cr-curtain-sub">Semua pemain menerima kad serentak.</div>
@@ -108,7 +108,6 @@ function buildOverlay() {
     </div>
     <div class="cr-sheet" id="cr-sheet" hidden>
       <div class="cr-sheet-panel">
-        <div class="cr-sheet-handle"></div>
         <div class="cr-sheet-kicker">PERATURAN WATAK ANDA</div>
         <div class="cr-sheet-name" id="cr-sheet-name"></div>
         <div class="cr-sheet-body" id="cr-sheet-body"></div>
