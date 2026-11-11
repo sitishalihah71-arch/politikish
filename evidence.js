@@ -18,6 +18,7 @@
 
 import { GAME_BALANCE } from './balance.js';
 import { adjustBalance, addCorruption, addSkipTurns, applyApprovalDelta } from './effects.js';
+import { reduceMoneyPenalty } from './abilities.js';
 
 const cfg = GAME_BALANCE.shadowPolitics;
 const CLEAN_POLITICIAN = 'cleanPolitician';
@@ -43,9 +44,11 @@ function skipTurnsFor(player, base) {
 // A deal was just accepted and its payment moved. Applies the Corruption and
 // Public Trust the acceptance itself costs (GDD 4.1, 4.2) and records the
 // token. Returns { token, corruption: {initiator, recipient} }.
-export function recordAcceptedDeal({ initiator, recipient, dealType, money, influence, round, contractId = null }) {
+// `initiatorCorruption` overrides the standard amount for one named case: the
+// Fixer's own Fixer Deal (GDD 4.1: character exceptions must be explicit).
+export function recordAcceptedDeal({ initiator, recipient, dealType, money, influence, round, contractId = null, initiatorCorruption = cfg.corruptionPerAcceptedDeal }) {
   const corruption = {
-    initiator: addCorruption(initiator, cfg.corruptionPerAcceptedDeal),
+    initiator: addCorruption(initiator, initiatorCorruption),
     recipient: addCorruption(recipient, cfg.corruptionPerAcceptedDeal),
   };
   applyApprovalDelta(recipient, cfg.trustAcceptCorruptDeal);
@@ -98,11 +101,14 @@ export function markContractExposed(contractId, round) {
 // ---------- Exposure ----------
 
 // Takes money / Influence the way every other effect does: never below zero
-// for someone who is not already in debt. Returns what was really taken.
-function take(player, money, influence) {
-  const lostMoney = money ? -adjustBalance(player, 'money', -money) : 0;
+// for someone who is not already in debt. The Money part first goes through
+// the Lawyer's passive and any armed Lawyer / Ally shield (abilities.js);
+// Influence is never reduced. Returns what was really taken.
+function take(player, money, influence, ctx) {
+  const penalty = reduceMoneyPenalty(player, money, ctx);
+  const lostMoney = penalty.amount ? -adjustBalance(player, 'money', -penalty.amount) : 0;
   const lostInfluence = influence ? -adjustBalance(player, 'influence', -influence) : 0;
-  return { money: lostMoney, influence: lostInfluence };
+  return { money: lostMoney, influence: lostInfluence, reducedBy: penalty.reducedBy, shieldsUsed: penalty.shieldsUsed, allyBonus: penalty.allyBonus };
 }
 
 // An accepted deal was exposed by someone holding its token. `exposer` is
@@ -125,7 +131,7 @@ export function exposeToken(tokenId, players, { round = null, exposerSlot = null
   const result = { initiator: {}, recipient: {} };
   [['initiator', initiator], ['recipient', recipient]].forEach(([side, player]) => {
     const row = table[side];
-    const lost = take(player, row.money || 0, row.influence || 0);
+    const lost = take(player, row.money || 0, row.influence || 0, { players, involvedSlots: [initiator.slot, recipient.slot] });
     const skipTurns = skipTurnsFor(player, row.skipTurns || 0);
     addSkipTurns(player, skipTurns, 'deal-exposed');
     const corruption = row.corruption ? addCorruption(player, row.corruption) : 0;
@@ -144,9 +150,9 @@ export function exposeToken(tokenId, players, { round = null, exposerSlot = null
 
 // A deal was exposed before the recipient accepted it (nothing was paid, no
 // token exists). The initiator pays, the recipient is rewarded.
-export function applyExposedBeforeAccept(initiator, recipient) {
+export function applyExposedBeforeAccept(initiator, recipient, players = []) {
   const row = cfg.consequences.exposedBeforeAccept;
-  const lost = take(initiator, row.initiator.money, row.initiator.influence);
+  const lost = take(initiator, row.initiator.money, row.initiator.influence, { players, involvedSlots: [initiator.slot, recipient.slot] });
   const skipTurns = skipTurnsFor(initiator, row.initiator.skipTurns);
   addSkipTurns(initiator, skipTurns, 'deal-exposed');
 

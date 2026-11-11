@@ -509,6 +509,13 @@ const ACTION_REJECT_MESSAGES = {
   'chat-too-fast': 'Perlahan sikit — mesej terlalu laju.',
   'chat-thread-full': 'Sembang ini sudah penuh.',
   'chat-empty': 'Tulis sesuatu dulu.',
+  'ability-unavailable': 'Kuasa itu tidak tersedia untuk anda.',
+  'not-your-turn': 'Kuasa khas hanya boleh digunakan pada giliran anda.',
+  'special-used-this-turn': 'Hanya satu kuasa khas setiap giliran.',
+  cooldown: 'Kuasa itu masih dalam cooldown.',
+  'limit-reached': 'Kuasa itu sudah habis digunakan.',
+  'cannot-initiate-deal': 'Watak anda tidak boleh memulakan Backroom Deal.',
+  'deal-not-found': 'Tawaran itu sudah tiada.',
 };
 
 let hasEnteredMatchScreen = false;

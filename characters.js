@@ -222,6 +222,8 @@ export function dealCharacters(players) {
     const card = deck.pop();
     player.character = { id: card.id };
     player.abilityState = {};
+    // The Money Man's passive: Starting Capital.
+    if (card.id === 'moneyMan') player.money += GAME_BALANCE.characters.moneyManStartingCapital;
   });
 }
 

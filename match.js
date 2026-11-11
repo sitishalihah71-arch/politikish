@@ -17,8 +17,9 @@ import { bus, formatMoney } from './utils.js';
 import * as room from './room.js';
 import * as multiplayer from './multiplayer.js';
 import { RANKS, initMatchState, stripPrivateFields } from './player.js';
-import { dealCharacters } from './characters.js';
-import { applyScandalPenalty, tickPublicSupport, consumeSkipTurn } from './effects.js';
+import { dealCharacters, checkAbilityUse, markAbilityUsed } from './characters.js';
+import { characterIdOf, armShield, claimIntegrityBonus } from './abilities.js';
+import { applyScandalPenalty, tickPublicSupport, consumeSkipTurn, applyApprovalDelta } from './effects.js';
 import { generateProjectOffers, resolveProjek } from './projects.js';
 import { generateMediaOffers, resolveMedia } from './media.js';
 import { resolvePolitik } from './politics.js';
@@ -29,7 +30,7 @@ import {
   proposeDeal, respondToDeal, resetDeals, getContractViewsFor, getActiveContractsAsTarget,
   getBreachedContractsAsOfferer, handleAction as contractsOnAction, handleVoteResolved as contractsOnVote,
   handleRoundEnd as contractsOnRoundEnd, noteTurnStart as contractsNoteTurnStart, exposeContract,
-  getNextVoteRound, getPendingDealViewsFor, hasDealBetween,
+  getNextVoteRound, getPendingDealViewsFor, hasDealBetween, exposePendingDeal,
 } from './backroomDeals.js';
 import { recordMessage, getTranscript, resetChats } from './backroomChat.js';
 import { PARLIAMENT_MOTIONS, pickMotion, applyMotion } from './parliament.js';
@@ -43,6 +44,7 @@ let maxRounds = GAME_BALANCE.room.defaultRounds; // captured from room settings 
 let turnSlot = 1;
 let matchOver = false;
 let charactersMode = false; // Mode Watak, captured at match start (host)
+let specialTurnKey = null; // 'round:slot' of the turn a character special was last used on (one per turn)
 let winnerId = null;
 let clientPlayers = []; // client-side cache; irrelevant on host (uses room.getPlayersLive())
 let lastAction = null; // descriptor of the most recently resolved action, for toasts/sound cues
@@ -753,16 +755,28 @@ function notifyPlayer(playerId, type, payload) {
 // Backroom Deals are not turn actions - any connected player can propose or
 // respond at any time (see backroomDeals.js), so neither of these checks
 // isActivePlayerId the way every other resolver does.
-function hostProposeDeal(offererId, targetId, money, influence, condition, respond) {
+// `special` ('fixer' | 'funding') starts the deal with the Fixer's or Money
+// Man's special instead of as a plain deal (see abilities.js).
+function hostProposeDeal(offererId, targetId, money, influence, condition, respond, special = null) {
   const players = room.getPlayersLive();
   const offerer = players.find((p) => p.id === offererId);
   const target = players.find((p) => p.id === targetId);
   if (!offerer) return;
-  const result = proposeDeal(offerer, target, money, influence, condition, players, dealContext());
+  const reject = (reason) => respond({ type: 'action-rejected', payload: { reason } });
+  // The Lawyer's weakness: never starts a Backroom Deal, special or not.
+  if (charactersMode && characterIdOf(offerer) === 'lawyer') return reject('cannot-initiate-deal');
+  if (special) {
+    const needs = special === 'fixer' ? 'fixer' : special === 'funding' ? 'moneyMan' : null;
+    if (!charactersMode || !needs || characterIdOf(offerer) !== needs) return reject('ability-unavailable');
+    const use = checkSpecialUse(offerer);
+    if (!use.ok) return reject(use.reason);
+  }
+  const result = proposeDeal(offerer, target, money, influence, condition, players, { ...dealContext(), special: special || null });
   if (!result.ok) {
-    respond({ type: 'action-rejected', payload: { reason: result.reason } });
+    reject(result.reason);
     return;
   }
+  if (special) spendSpecial(offerer);
   // A bot target has no connection/local screen for notifyPlayer to reach -
   // it never "receives" the offer through the normal channel, so its
   // accept/reject decision is driven directly instead. It turns down a
@@ -783,9 +797,112 @@ function hostProposeDeal(offererId, targetId, money, influence, condition, respo
     money: result.money,
     influence: result.influence,
     condition: result.condition,
+    // Only the Clean Politician may answer an offer by exposing it.
+    canExpose: charactersMode && characterIdOf(target) === 'cleanPolitician',
   });
   // The offerer's own copy of the pending offer (what the chat hangs off).
   sendUpdateToParties([offererId]);
+}
+
+// ---------- Character specials (Mode Watak) ----------
+// Every special is free, used on the owner's own turn, at most one per turn,
+// and obeys the character's own cooldown / per-game limit (characters.js).
+const turnKey = () => `${currentRound}:${turnSlot}`;
+
+function checkSpecialUse(player) {
+  if (!charactersMode) return { ok: false, reason: 'ability-unavailable' };
+  if (!isActivePlayerId(player.id)) return { ok: false, reason: 'not-your-turn' };
+  if (specialTurnKey === turnKey()) return { ok: false, reason: 'special-used-this-turn' };
+  const check = checkAbilityUse(player, 'special', currentRound);
+  return check.ok ? { ok: true } : { ok: false, reason: check.reason };
+}
+
+function spendSpecial(player) {
+  markAbilityUsed(player, 'special', currentRound);
+  specialTurnKey = turnKey();
+}
+
+// Tells a player (privately) that a shield saved them money, and pays the
+// Ally who raised it. `lost` is what evidence.js's penalty returned.
+function announceShieldUse(player, lost) {
+  if (!lost || !lost.shieldsUsed || !lost.shieldsUsed.length) return;
+  notifyPlayer(player.id, 'ability-notice', {
+    kind: 'shield-used',
+    reducedBy: lost.reducedBy,
+    text: `Perlindungan mengurangkan penalti wang anda sebanyak ${formatMoney(lost.reducedBy)}.`,
+  });
+  (lost.allyBonus || []).forEach((bonus) => {
+    notifyPlayer(bonus.playerId, 'ability-notice', {
+      kind: 'ally-bonus',
+      influence: bonus.influence,
+      text: `Perlindungan anda berjaya. +${bonus.influence} Influence.`,
+    });
+  });
+}
+
+// Powers that are not a deal: for now the Lawyer's Legal Defence and the
+// Ally's Protective Alliance - each arms a shield on a chosen player.
+function hostUseAbility(playerId, abilityId, payload, respond) {
+  const players = room.getPlayersLive();
+  const player = players.find((p) => p.id === playerId);
+  if (!player) return;
+  const reject = (reason) => respond({ type: 'action-rejected', payload: { reason } });
+  const characterId = characterIdOf(player);
+  if (abilityId !== 'special' || (characterId !== 'lawyer' && characterId !== 'ally')) return reject('ability-unavailable');
+
+  const use = checkSpecialUse(player);
+  if (!use.ok) return reject(use.reason);
+  const target = players.find((p) => p.id === payload?.targetId);
+  if (!target) return reject('invalid-target');
+  if (characterId === 'ally' && target.id === player.id) return reject('invalid-target'); // protects ANOTHER player
+
+  armShield(target, characterId === 'ally' ? 'ally' : 'lawyer', { sourceSlot: player.slot, round: currentRound });
+  spendSpecial(player);
+  notifyPlayer(player.id, 'ability-result', { abilityId, ok: true, targetId: target.id });
+  if (target.id !== player.id) {
+    notifyPlayer(target.id, 'ability-notice', {
+      kind: 'shield',
+      text: 'Seseorang melindungi anda. Penalti wang layak anda yang seterusnya dikurangkan 50%.',
+    });
+  }
+  broadcastMatchUpdate(); // the owner's cooldown and the target's shield live in private state
+}
+
+// The Clean Politician's special: answer an offer by exposing it instead of
+// accepting or rejecting. The offer is cancelled, the offerer pays the
+// "exposed before acceptance" row and the exposure is public.
+function hostExposeOffer(responderId, dealId, respond) {
+  const players = room.getPlayersLive();
+  const responder = players.find((p) => p.id === responderId);
+  const reject = (reason) => respond({ type: 'action-rejected', payload: { reason } });
+  if (!responder || !charactersMode || characterIdOf(responder) !== 'cleanPolitician') return reject('ability-unavailable');
+
+  const result = exposePendingDeal(dealId, responderId, players);
+  if (!result.ok) return reject('deal-not-found');
+  const { offerer, target } = result;
+
+  // Public Integrity: the Clean Politician's own reward on top, once a round.
+  let integrity = 0;
+  if (claimIntegrityBonus(target, currentRound)) {
+    const before = target.approval;
+    applyApprovalDelta(target, GAME_BALANCE.characters.cleanPolitician.integrityTrust);
+    integrity = target.approval - before;
+  }
+  const cost = result.initiator;
+  const parts = [cost.money ? formatMoney(cost.money) : '', cost.influence ? `${cost.influence} Influence` : ''].filter(Boolean).join(' dan ');
+  postNews({
+    icon: '🗂️',
+    headline: 'TAWARAN RASUAH DIDEDAH',
+    description: `${target.name} menolak dan mendedahkan tawaran sulit daripada ${offerer.name}.${parts ? ` ${offerer.name} didenda ${parts}` : ` ${offerer.name} dikenakan penalti`}${cost.skipTurns ? ` dan langkau ${cost.skipTurns} giliran` : ''}. ${target.name} mendapat kepercayaan awam.`,
+    feedText: `🗂️ ${target.name} mendedahkan tawaran rasuah daripada ${offerer.name}!`,
+    feedType: 'news',
+  });
+  notifyPlayer(offerer.id, 'deal-result', { accepted: false, exposed: true, role: 'offerer', otherId: target.id });
+  notifyPlayer(target.id, 'deal-result', { accepted: false, exposed: true, role: 'target', otherId: offerer.id, integrity });
+  announceShieldUse(offerer, cost);
+  maybeCompleteObjective(offerer);
+  maybeCompleteObjective(target);
+  broadcastMatchUpdate();
 }
 
 // What backroomDeals.js needs to know about the match around a deal.
@@ -801,6 +918,8 @@ function dealContext() {
 
 function hostRespondToDeal(responderId, dealId, accept) {
   const players = room.getPlayersLive();
+  // The Whistleblower's weakness (Clean Hands): they can never accept a deal.
+  if (accept && charactersMode && characterIdOf(players.find((p) => p.id === responderId)) === 'whistleblower') accept = false;
   const result = respondToDeal(dealId, accept, players, dealContext(), Math.random, responderId);
   if (!result.ok) return; // already resolved/expired - nothing to do
 
@@ -839,7 +958,8 @@ function hostRespondToDeal(responderId, dealId, accept) {
     upfront: result.upfront || null,
     held: result.held || null,
   };
-  notifyPlayer(result.offererId, 'deal-result', { ...detail, role: 'offerer', otherId: result.targetId });
+  // What a character power paid out on this deal is for the offerer's eyes only.
+  notifyPlayer(result.offererId, 'deal-result', { ...detail, role: 'offerer', otherId: result.targetId, perk: result.perk || null });
   notifyPlayer(result.targetId, 'deal-result', { ...detail, role: 'target', otherId: result.offererId });
   broadcastMatchUpdate();
 }
@@ -989,8 +1109,13 @@ function handleHostMatchMessage(type, payload, conn) {
   } else if (type === 'character-ready') {
     hostConfirmReveal(conn.peer);
   } else if (type === 'deal-propose') {
-    // Not turn-gated - any connected player can propose a bribe at any time.
-    hostProposeDeal(conn.peer, payload?.targetId, payload?.money || 0, payload?.influence || 0, payload?.condition, respond);
+    // Not turn-gated - any connected player can propose a bribe at any time
+    // (a character special started this way is checked inside).
+    hostProposeDeal(conn.peer, payload?.targetId, payload?.money || 0, payload?.influence || 0, payload?.condition, respond, payload?.special || null);
+  } else if (type === 'deal-expose-offer') {
+    hostExposeOffer(conn.peer, payload?.dealId, respond);
+  } else if (type === 'ability-use') {
+    hostUseAbility(conn.peer, payload?.abilityId, payload, respond);
   } else if (type === 'deal-respond') {
     hostRespondToDeal(conn.peer, payload?.dealId, Boolean(payload?.accept));
   } else if (type === 'deal-expose') {
@@ -1080,6 +1205,10 @@ function handleClientMatchMessage(type, payload) {
     bus.emit('match:deal-offer', payload);
   } else if (type === 'deal-result') {
     bus.emit('match:deal-result', payload);
+  } else if (type === 'ability-result') {
+    bus.emit('match:ability-result', payload);
+  } else if (type === 'ability-notice') {
+    bus.emit('match:ability-notice', payload);
   } else if (type === 'deal-contract-event') {
     bus.emit('match:deal-contract-event', payload);
   } else if (type === 'deal-chat') {
@@ -1191,13 +1320,36 @@ export function chooseMarketAsset(assetType) {
 }
 
 // Backroom Deals are never turn-gated - can be called any time, by anyone.
-export function proposeBackroomDeal(targetId, money, influence, condition = { type: 'none' }) {
+export function proposeBackroomDeal(targetId, money, influence, condition = { type: 'none' }, special = null) {
   if (isHostRole()) {
     hostProposeDeal(room.getRoomSnapshot().localPlayerId, targetId, money, influence, condition, (msg) => {
       bus.emit('match:action-rejected', { reason: msg.payload.reason });
+    }, special);
+  } else {
+    multiplayer.send({ type: 'deal-propose', payload: { targetId, money, influence, condition, special } });
+  }
+}
+
+// Mode Watak: the Clean Politician answers an offer by exposing it.
+export function exposeBackroomOffer(dealId) {
+  if (isHostRole()) {
+    hostExposeOffer(room.getRoomSnapshot().localPlayerId, dealId, (msg) => {
+      bus.emit('match:action-rejected', { reason: msg.payload.reason });
     });
   } else {
-    multiplayer.send({ type: 'deal-propose', payload: { targetId, money, influence, condition } });
+    multiplayer.send({ type: 'deal-expose-offer', payload: { dealId } });
+  }
+}
+
+// Mode Watak: use a character special that is not a deal (Lawyer, Ally ...).
+// `params` is whatever that special needs, e.g. { targetId }.
+export function useAbility(abilityId, params = {}) {
+  if (isHostRole()) {
+    hostUseAbility(room.getRoomSnapshot().localPlayerId, abilityId, params, (msg) => {
+      bus.emit('match:action-rejected', { reason: msg.payload.reason });
+    });
+  } else {
+    multiplayer.send({ type: 'ability-use', payload: { ...params, abilityId } });
   }
 }
 
@@ -1352,6 +1504,7 @@ export function resetMatch() {
   turnSkipping = false;
   advancedMode = false;
   charactersMode = false;
+  specialTurnKey = null;
   marketStock = [];
   passivePayout = null;
   clearTimeout(revealGate?.timer);

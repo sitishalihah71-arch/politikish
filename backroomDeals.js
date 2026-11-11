@@ -22,6 +22,7 @@ import { RANK_LABELS, getNextRank } from './player.js';
 import { validateSabotaj } from './sabotage.js';
 import { applyScandalDelta, demoteOneRank } from './effects.js';
 import { recordAcceptedDeal, applyExposedBeforeAccept, markContractExposed, resetEvidence } from './evidence.js';
+import { applyFixerPerk, applyFundingBonus } from './abilities.js';
 
 const cfg = GAME_BALANCE.backroomDeals;
 
@@ -132,7 +133,9 @@ export function proposeDeal(offerer, target, money, influence, rawCondition = nu
 
   dealSeq += 1;
   const dealId = `deal-${dealSeq}`;
-  pendingDeals.set(dealId, { offererId: offerer.id, targetId: target.id, money: m, influence: inf, condition: built.condition });
+  // `ctx.special` ('fixer' | 'funding') marks a deal started with a character
+  // power; match.js has already checked the offerer may use it.
+  pendingDeals.set(dealId, { offererId: offerer.id, targetId: target.id, money: m, influence: inf, condition: built.condition, special: ctx.special || null });
   return { ok: true, dealId, money: m, influence: inf, condition: built.condition };
 }
 
@@ -203,13 +206,25 @@ export function respondToDeal(dealId, accept, players, ctx = {}, rng = Math.rand
   // Mode Watak (ctx.characters): an accepted deal costs Corruption and Public
   // Trust and leaves one Evidence Token (evidence.js). Off: nothing changes.
   const dealType = deal.condition.type === 'none' ? 'plain' : deal.condition.type;
+  const fixerDeal = Boolean(ctx.characters) && deal.special === 'fixer';
   const record = (contractId = null) => (ctx.characters
-    ? recordAcceptedDeal({ initiator: offerer, recipient: target, dealType, money: deal.money, influence: deal.influence, round: ctx.round || 1, contractId })
+    ? recordAcceptedDeal({
+      initiator: offerer, recipient: target, dealType, money: deal.money, influence: deal.influence, round: ctx.round || 1, contractId,
+      ...(fixerDeal ? { initiatorCorruption: GAME_BALANCE.characters.fixer.corruptionAsInitiator } : {}),
+    })
     : null);
+  // Character perks on an accepted deal, paid on what was offered.
+  const perks = () => {
+    if (!ctx.characters || !deal.special) return null;
+    const paid = { money: deal.money, influence: deal.influence };
+    const bonus = deal.special === 'fixer' ? applyFixerPerk(offerer, paid) : applyFundingBonus(offerer, target, paid);
+    return { kind: deal.special, bonus };
+  };
 
   if (!conditional) {
     const shadow = record();
-    return { ...base, leaked: false, ...(shadow ? { corruption: shadow.corruption } : {}) };
+    const perk = perks();
+    return { ...base, leaked: false, ...(shadow ? { corruption: shadow.corruption } : {}), ...(perk ? { perk } : {}) };
   }
 
   contractSeq += 1;
@@ -230,7 +245,8 @@ export function respondToDeal(dealId, accept, players, ctx = {}, rng = Math.rand
   };
   contracts.push(contract);
   const shadow = record(contract.id);
-  return { ...base, leaked: false, contract: viewOf(contract), contractId: contract.id, upfront, held, ...(shadow ? { corruption: shadow.corruption } : {}) };
+  const perk = perks();
+  return { ...base, leaked: false, contract: viewOf(contract), contractId: contract.id, upfront, held, ...(shadow ? { corruption: shadow.corruption } : {}), ...(perk ? { perk } : {}) };
 }
 
 // ---------- Contract lifecycle ----------
@@ -423,7 +439,7 @@ export function exposePendingDeal(dealId, exposerId, players) {
   const target = players.find((p) => p.id === deal.targetId);
   pendingDeals.delete(dealId);
   if (!offerer || !target) return { ok: false, reason: 'deal-not-found' };
-  return { ok: true, offerer, target, ...applyExposedBeforeAccept(offerer, target) };
+  return { ok: true, offerer, target, ...applyExposedBeforeAccept(offerer, target, players) };
 }
 
 // Pending offers the player has made and not yet had answered - their own

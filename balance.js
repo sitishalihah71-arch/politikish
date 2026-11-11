@@ -62,6 +62,29 @@ export const GAME_BALANCE = {
     // client-side suspense pacing (see characterReveal.js).
     revealTimeoutMs: 60000,
     reveal: { curtainMs: 2400, riseMs: 1400, shakeMs: 2800, flipMs: 1300 },
+
+    // Character powers (abilities.js). Every special is free, used on the
+    // owner's own turn, at most one per turn. Reductions on one penalty never
+    // exceed `maxReductionPct` in total, whatever mix of passive and shields.
+    moneyManStartingCapital: 10000, // Starting Capital (passive)
+    fixer: {
+      perkPercent: 10, // Deal Specialist: extra reward on a Fixer Deal, rounded down, both currencies
+      corruptionAsInitiator: 5, // a Fixer Deal costs its Fixer only this much Corruption (others pay the standard 20)
+    },
+    moneyMan: {
+      fundingBonusPercent: 30, // extra the Money Man receives when a Dirty Politics player accepts Secret Funding
+      fundingCap: 20000, // the bonus is worked out on at most this much per use (so at most 6,000)
+    },
+    cleanPolitician: {
+      integrityTrust: 5, // Public Integrity: +5% Public Trust for a successful exposure, once per round
+    },
+    shield: {
+      lawyerPct: 50, // Legal Defence
+      lawyerPassivePct: 10, // Legal Protection, always on for the Lawyer
+      allyPct: 50, // Protective Alliance
+      allyBonusInfluence: 100, // Mutual Support: when the Ally's shield actually saves someone money
+      maxReductionPct: 50,
+    },
   },
 
   // Shadow Politics (Mode Watak only; evidence.js). Corruption Points are the
