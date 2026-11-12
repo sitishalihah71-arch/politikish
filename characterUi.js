@@ -384,12 +384,13 @@ export function publicCharacterTag(player) {
   return id ? getCharacter(id)?.name || null : null;
 }
 
-// What the end screen says about a player's character (everything is public by then).
+// What the end screen adds about a character: the stats grid already names the card,
+// so this only says who an Opportunist copied (everything is public by then).
 export function endScreenCharacterLine(player) {
-  if (!player.character) return null;
+  if (!player.character?.copiedId) return null;
   const base = getCharacter(player.character.id)?.name || '';
-  const copy = player.character.copiedId ? getCharacter(player.character.copiedId)?.name : null;
-  return copy ? `${base}, menyalin ${copy}` : base;
+  const copy = getCharacter(player.character.copiedId)?.name;
+  return copy ? `${base}, menyalin ${copy}` : null;
 }
 
 // ---------- the host's answers ----------
@@ -531,6 +532,7 @@ export function initCharacterUi(callbacks) {
   if (wired) return;
   wired = true;
   $('#btn-power-close').addEventListener('click', () => { sound.playClick(); closePower(); });
+  $('#shadow-banner').addEventListener('click', () => $('#shadow-banner').classList.toggle('is-open'));
   $('#power-modal').addEventListener('click', (e) => { if (e.target.id === 'power-modal') closePower(); });
   $('#btn-trial-admit').addEventListener('click', () => {
     sound.playClick();
