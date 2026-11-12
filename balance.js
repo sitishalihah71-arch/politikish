@@ -43,11 +43,11 @@ export const GAME_BALANCE = {
     defaultNationalEvents: true,
     defaultParliamentVoting: true,
     defaultAdvancedMode: false,
-    // Character Expansion ("Mode Watak"). Off by default, and the lobby switch
-    // stays hidden until this is true (testers can reveal it early with the
-    // ?watak URL parameter). See characters.js.
+    // Character Expansion ("Mode Watak"). Off by default; the lobby switch and the
+    // How to Play section show once charactersToggleVisible is true (testers could
+    // reveal them earlier with ?watak). See characters.js.
     defaultCharacters: false,
-    charactersToggleVisible: false,
+    charactersToggleVisible: true, // opened after the phase 6 balance run (all 12 within +/-40%)
   },
 
   // Character Expansion tunables (characters.js). `minPlayers` keeps a card
