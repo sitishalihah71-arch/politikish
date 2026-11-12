@@ -16,9 +16,13 @@ import { renderAvatarSVG } from './avatar.js';
 import { GAME_BALANCE } from './balance.js';
 import { activeCharacters, getCharacter, getAbilityStatus } from './characters.js';
 import { SPY_CATEGORIES } from './investigation.js';
+import { buildCharacterCard } from './characterCard.js';
 
 const kcfg = GAME_BALANCE.characters.kingmaker;
 const pcfg = GAME_BALANCE.characters.populist;
+const icfg = GAME_BALANCE.characters.investigation;
+const mcfg = GAME_BALANCE.characters.mediaTrial;
+const dcfg = GAME_BALANCE.characters.defamation;
 
 const CATEGORY_NAMES = {
   finance: 'Kewangan',
@@ -65,13 +69,17 @@ function closePower() {
   $('#power-body').innerHTML = '';
 }
 
-function playerRow(player, label, onPick) {
-  const btn = el('button', 'target-picker-item');
+function playerRow(player, label, onPick, { sub = '', disabled = false, mark = false } = {}) {
+  const btn = el('button', `target-picker-item${disabled ? ' is-disabled' : ''}${mark ? ' is-mark' : ''}`);
   btn.type = 'button';
+  btn.disabled = disabled;
   const avatar = el('div', 'lobby-player-avatar');
   avatar.innerHTML = renderAvatarSVG(player.avatar, 36);
   btn.appendChild(avatar);
-  btn.appendChild(el('span', '', label || player.name));
+  const text = el('span', 'power-choice-text');
+  text.appendChild(el('b', '', label || player.name));
+  if (sub) text.appendChild(el('small', 'power-sub', sub));
+  btn.appendChild(text);
   btn.addEventListener('click', () => { sound.playClick(); onPick(player); });
   return btn;
 }
@@ -97,16 +105,22 @@ function note(text) {
   return el('p', 'setting-note power-note', text);
 }
 
-// Who? (every power that needs a player). `includeSelf` for the Lawyer.
-function pickPlayer({ title, kicker, intro, includeSelf = false, onPick }) {
+// Who? (every power that needs a player). `describe(player)` may add a sub-line,
+// disable or mark a row.
+function pickPlayer({ title, kicker, intro, includeSelf = false, describe = () => ({}), onPick }) {
   const s = snap();
   const me = localOf(s);
   const candidates = s.players.filter((p) => p.connected && (includeSelf || p.id !== me.id));
   const box = el('div');
   if (intro) box.appendChild(note(intro));
-  box.appendChild(listOf(candidates.map((p) => playerRow(p, p.id === me.id ? `${p.name} (anda)` : p.name, (picked) => onPick(picked)))));
+  box.appendChild(listOf(candidates.map((p) => playerRow(p, p.id === me.id ? `${p.name} (anda)` : p.name, (picked) => onPick(picked), describe(p)))));
   openPower(title, kicker, box);
 }
+
+// What the investigation roll is for this target (50% + 30% of Scandal, capped). Event bonuses and
+// the Fixer's Paper Trail are not shown: this is the player-facing estimate.
+const findChance = (target) => Math.round(Math.min(icfg.baseChance + icfg.scandalWeight * (target.scandal || 0), icfg.maxChance) * 10) / 10;
+const scandalLine = (p) => `Skandal ${p.scandal}%`;
 
 const send = (abilityId, params = {}) => {
   closePower();
@@ -118,51 +132,71 @@ const send = (abilityId, params = {}) => {
 const FLOWS = {
   // Fixer / Money Man: the ordinary deal screens, with the special switched on.
   fixer: () => hooks.openDeal('fixer'),
-  moneyMan: () => hooks.openDeal('funding'),
+  moneyMan: (abilityId, targetId) => hooks.openDeal('funding', targetId),
 
   spy: () => pickPlayer({
-    title: 'Siasatan Rahsia', kicker: 'Perisik', intro: 'Siapa yang mahu disiasat? Sasaran tahu dia disiasat, tetapi bukan oleh siapa (kecuali anda gagal).',
+    title: 'Siasatan Rahsia', kicker: 'Perisik', intro: 'Siapa yang mahu disiasat? Sasaran tahu dia disiasat, tetapi bukan oleh siapa (kecuali penyamaran anda terbongkar).',
+    describe: (p) => ({ sub: `${scandalLine(p)} · Risiko terbongkar ${Math.round((100 - findChance(p)) * 10) / 10}%` }),
     onPick: (target) => {
       const box = el('div');
-      box.appendChild(note(`Siasat ${target.name} tentang:`));
+      box.appendChild(note(`Siasat ${target.name} tentang: (peluang berjaya ${findChance(target)}% = ${icfg.baseChance}% + ${icfg.scandalWeight * 100}% daripada Skandal; selebihnya penyamaran terbongkar)`));
       box.appendChild(listOf(SPY_CATEGORIES.map((category) => choiceRow(CATEGORY_NAMES[category], CATEGORY_HINTS[category], () => send('special', { targetId: target.id, category })))));
       openPower('Pilih kategori', 'Perisik', box);
     },
   }),
 
   whistleblower: () => pickPlayer({
-    title: 'Pendedahan Awam', kicker: 'Pembocor Rahsia', intro: 'Siasat seorang pemain. Jika dia ada deal tersembunyi, anda boleh mendedahkannya.',
+    title: 'Pendedahan Awam', kicker: 'Pembocor Rahsia', intro: 'Siasat seorang pemain. Jika dia ada deal yang sudah diterima, anda boleh mendedahkannya. Bukti palsu tidak boleh menipu anda.',
+    describe: (p) => ({ sub: `${scandalLine(p)} · Peluang bukti ${findChance(p)}%` }),
     onPick: (target) => send('special', { targetId: target.id }),
   }),
 
   journalist: (abilityId) => {
     if (abilityId === 'special.report') {
       pickPlayer({
-        title: 'Laporan Penyiasatan', kicker: 'Wartawan', intro: 'Siasat seorang pemain. Jika berjaya anda boleh menerbitkan satu bukti. Berhati-hati: bukti boleh dipalsukan.',
+        title: 'Laporan Penyiasatan', kicker: 'Wartawan',
+        intro: `Sistem melempar dadu: peluang = ${icfg.baseChance}% + ${icfg.scandalWeight * 100}% daripada Skandal sasaran (maksimum ${icfg.maxChance}%). Jika ditemui, anda boleh menerbitkan satu Dirty Deal.`,
+        describe: (p) => ({ sub: `${scandalLine(p)} · Peluang bukti ${findChance(p)}%${categoryClues[p.id] ? ` · Petunjuk: ${categoryClues[p.id].label}` : ''}` }),
         onPick: (target) => send('special.report', { targetId: target.id }),
       });
       return;
     }
     pickPlayer({
-      title: 'Perbicaraan Media', kicker: 'Wartawan', intro: 'Tuduh seorang pemain sebagai watak tertentu. Tuduhan salah: anda kena Defamation.',
+      title: 'Perbicaraan Media', kicker: 'Wartawan',
+      intro: `Tuduh seorang pemain sebagai watak tertentu. Dia menjawab "Betul, diakui" atau "Tuduhan salah" dan sistem menyemak kebenarannya. Tuduhan yang salah dan dinafikan: Defamation (−${formatMoney(dcfg.money)}, −${dcfg.trust}% Public Trust).`,
+      describe: (p) => (p.revealedCharacter
+        ? { sub: 'Watak sudah didedahkan', disabled: true }
+        : { sub: categoryClues[p.id] ? `Kategori diketahui: ${categoryClues[p.id].label}` : 'Kategori tidak diketahui', mark: Boolean(categoryClues[p.id]) }),
       onPick: (target) => {
         const box = el('div');
         const me = localOf(snap());
         const clue = categoryClues[target.id];
         box.appendChild(note(clue
           ? `Siapakah ${target.name}? Laporan anda menunjukkan kategorinya: ${clue.label}.`
-          : `Siapakah ${target.name}? Tiada petunjuk lagi. Terbitkan Laporan Penyiasatan dahulu untuk mengetahui kategorinya.`));
+          : `Siapakah ${target.name}? Tiada petunjuk lagi. Terbitkan Laporan Penyiasatan dahulu untuk mengecilkan pilihan, kerana tekaan salah dikenakan Defamation.`));
         const names = activeCharacters().filter((c) => c.id !== effectiveId(me) && (!clue || c.category === clue.category));
-        box.appendChild(listOf(names.map((c) => choiceRow(c.name, null, () => send('special.mediaTrial', { targetId: target.id, characterId: c.id })))));
+        box.appendChild(listOf(names.map((c) => choiceRow(c.name, CATEGORY_LABELS_BY_ID[c.category], () => send('special.mediaTrial', { targetId: target.id, characterId: c.id })))));
         openPower('Pilih watak', 'Wartawan', box);
       },
     });
   },
 
-  bureaucrat: () => pickPlayer({
-    title: 'Palsukan Bukti', kicker: 'Birokrat', intro: 'Sekali sepanjang game. Perisik dan Wartawan akan nampak bukti palsu tentang pemain ini. Rekod sebenar tidak berubah.',
-    onPick: (target) => send('special', { targetId: target.id }),
-  }),
+  bureaucrat: () => {
+    const me = localOf(snap());
+    const done = me.abilityState?.falsifiedSlot;
+    pickPlayer({
+      title: 'Palsukan Bukti', kicker: 'Birokrat',
+      intro: done !== undefined && done !== null
+        ? 'Anda sudah memalsukan bukti seorang pemain (ditanda). Pemain lain tidak boleh dipilih lagi.'
+        : 'Sekali sepanjang game. Perisik dan Wartawan akan nampak bukti palsu tentang pemain ini. Rekod sebenar tidak berubah.',
+      describe: (p) => {
+        const marked = done !== undefined && done !== null && p.slot === done;
+        const locked = done !== undefined && done !== null;
+        return { sub: marked ? 'Bukti dipalsukan' : '', mark: marked, disabled: locked && !marked };
+      },
+      onPick: (target) => send('special', { targetId: target.id }),
+    });
+  },
 
   lawyer: () => pickPlayer({
     title: 'Pembelaan Undang-undang', kicker: 'Peguam', includeSelf: true, intro: 'Penalti wang layak seterusnya ke atas pemain ini dikurangkan 50%. Tidak menghalang Dedahkan.',
@@ -177,10 +211,32 @@ const FLOWS = {
   populist: () => {
     const me = localOf(snap());
     const cost = Math.max(pcfg.campaignMinCost, Math.floor((Math.max(me.money, 0) * pcfg.campaignCostPercent) / 100));
-    const box = el('div');
-    box.appendChild(note(`Kempen awam: kos ${formatMoney(cost)}. Ganjaran +${pcfg.campaignTrust}% kepercayaan awam dan +${pcfg.campaignInfluence} Influence.`));
-    box.appendChild(listOf(choiceRow('Lancarkan kempen', `Bayar ${formatMoney(cost)}`, () => send('special', {}))));
-    openPower('Kempen Awam', 'Populis', box);
+    pickPlayer({
+      title: 'Kempen Awam', kicker: 'Populis', includeSelf: true,
+      intro: `Kos ${formatMoney(cost)} (${pcfg.campaignCostPercent}% wang anda, sekurang-kurangnya ${formatMoney(pcfg.campaignMinCost)}). Untuk diri sendiri: +${pcfg.campaignTrust}% kepercayaan awam dan +${pcfg.campaignInfluence} Influence. Untuk pemain lain: dia +${pcfg.campaignOtherTrust}%, anda +${pcfg.campaignInfluence} Influence.`,
+      describe: (p) => ({ sub: `Public Trust ${p.approval}%`, mark: p.id === me.id }),
+      onPick: (target) => {
+        const self = target.id === me.id;
+        const gain = self ? pcfg.campaignTrust : pcfg.campaignOtherTrust;
+        const box = el('div');
+        const dl = el('dl', 'power-facts');
+        [
+          ['Wang anda', formatMoney(me.money)],
+          ['Kos', `−${formatMoney(cost)}`],
+          [self ? 'Public Trust anda' : `Public Trust ${target.name}`, `${target.approval}% menjadi ${Math.min(100, target.approval + gain)}%`],
+          ['Influence anda', `+${pcfg.campaignInfluence}`],
+        ].forEach(([k, v]) => { dl.appendChild(el('dt', '', k)); dl.appendChild(el('dd', '', v)); });
+        box.appendChild(dl);
+        if (target.approval + gain > 100) box.appendChild(note(`Public Trust ${self ? 'anda' : target.name} sudah tinggi: kempen hanya menambah sehingga 100%.`));
+        if (!self) box.appendChild(note(`${target.name} akan diberitahu bahawa anda yang berkempen untuknya.`));
+        const go = el('button', 'menu-btn menu-btn-primary');
+        go.type = 'button';
+        go.appendChild(el('span', 'menu-btn-label', 'Mulakan kempen'));
+        go.addEventListener('click', () => { sound.playClick(); send('special', self ? {} : { targetId: target.id }); });
+        box.appendChild(go);
+        openPower('Mulakan kempen awam?', 'Populis', box);
+      },
+    });
   },
 
   opportunist: () => {
@@ -193,6 +249,7 @@ const FLOWS = {
     if (abilityId === 'special.powerBroker') {
       pickPlayer({
         title: 'Power Broker', kicker: 'Penentu Raja', intro: `Pindahkan ${kcfg.powerBrokerMin}-${kcfg.powerBrokerMax} Influence kepada pemain lain. Anda dapat +${kcfg.powerBrokerBonus} Influence bonus.`,
+        describe: (p) => ({ sub: `${p.influence} Influence` }),
         onPick: (target) => {
           const max = Math.min(kcfg.powerBrokerMax, Math.floor(me.influence / 50) * 50);
           const box = el('div');
@@ -223,108 +280,122 @@ const FLOWS = {
     if (abilityId === 'special.endorsement') {
       pickPlayer({
         title: 'Sokongan Rasmi', kicker: 'Penentu Raja',
-        intro: `Bayar ${kcfg.endorsementCost} Influence: pemain itu dapat ${kcfg.endorsementCost} Influence dan +${kcfg.endorsementTrust}% kepercayaan awam. Kedua-dua dapat +${kcfg.endorsementPerRound} Influence setiap ronda selama ${kcfg.endorsementRounds} ronda. Sekali sepanjang game, diumumkan kepada semua. Jika dia terdedah, anda yang rugi.`,
+        intro: `Bayar ${kcfg.endorsementCost} Influence: pemain itu dapat ${kcfg.endorsementCost} Influence dan +${kcfg.endorsementTrust}% kepercayaan awam. Kedua-dua dapat +${kcfg.endorsementPerRound} Influence setiap ronda selama ${kcfg.endorsementRounds} ronda. Sekali sepanjang game, diumumkan kepada semua pemain. Jika dia terdedah, anda yang rugi.`,
+        describe: (p) => ({ sub: `Public Trust ${p.approval}%` }),
         onPick: (target) => send('special.endorsement', { targetId: target.id }),
       });
       return;
     }
     if (abilityId === 'special.withdrawRenew') {
+      const mine = (snap().shadow?.endorsements || []).filter((e) => e.kingmakerId === me.id);
       const box = el('div');
-      box.appendChild(note('Tarik balik: pemain itu hilang 2% kepercayaan awam, tiada bayaran balik, diumumkan, dan tidak boleh disambung. Sambung: tambah 3 ronda (sekali sahaja).'));
+      mine.forEach((e) => box.appendChild(note(`Sokongan aktif: ${nameOf(e.targetId)}, sah sehingga ronda ${e.expiresRound}.`)));
+      box.appendChild(note('Tarik balik: pemain itu hilang 2% kepercayaan awam, tiada bayaran balik, diumumkan kepada semua, dan tidak boleh disambung. Sambung: tambah 3 ronda (sekali sahaja).'));
       box.appendChild(listOf(
-        choiceRow('Sambung sokongan', '+3 ronda', () => send('special.withdrawRenew', { mode: 'renew' })),
-        choiceRow('Tarik balik sokongan', 'Pemain itu −2% kepercayaan awam', () => send('special.withdrawRenew', { mode: 'withdraw' })),
+        choiceRow('Sambung sokongan', '+3 ronda, diumumkan kepada semua', () => send('special.withdrawRenew', { mode: 'renew' })),
+        choiceRow('Tarik balik sokongan', 'Pemain itu −2% kepercayaan awam, diumumkan kepada semua', () => send('special.withdrawRenew', { mode: 'withdraw' })),
       ));
       openPower('Sambung / Tarik Balik', 'Penentu Raja', box);
-      return;
     }
-    if (abilityId === 'special.bonusVote') send('special.bonusVote', {});
   },
 };
 
-// ---------- the list of powers in the character panel ----------
+const CATEGORY_LABELS_BY_ID = { dirty: 'Dirty Politics', clean: 'Clean Politics', investigation: 'Investigation', flexible: 'Flexible' };
 
+// ---------- the character card, with its buttons ----------
+
+// The buttons inside a card's Special panel: [{ id, name, hint }].
 function powersFor(charId) {
+  const c = getCharacter(charId);
   switch (charId) {
-    case 'fixer': return [{ id: 'special', label: 'Fixer Deal', hint: 'Mulakan deal khas: +5 Skandal sahaja, +10% ganjaran' }];
-    case 'moneyMan': return [{ id: 'special', label: 'Secret Funding', hint: 'Biayai pemain Dirty Politics: +30% untuk anda jika diterima' }];
-    case 'whistleblower': return [{ id: 'special', label: 'Pendedahan Awam', hint: 'Siasat, kemudian dedah deal tersembunyi' }];
-    case 'spy': return [{ id: 'special', label: 'Siasatan Rahsia', hint: 'Laporan risikan tentang seorang pemain' }];
+    case 'cleanPolitician': return [];
     case 'journalist': return [
-      { id: 'special.report', label: 'Laporan Penyiasatan', hint: 'Siasat dan terbitkan satu bukti' },
-      { id: 'special.mediaTrial', label: 'Perbicaraan Media', hint: 'Tuduh seorang pemain sebagai watak tertentu' },
+      { id: 'special.report', name: 'Investigative Report', hint: 'Siasat seorang pemain; jika berjaya terbitkan satu Dirty Deal' },
+      { id: 'special.mediaTrial', name: 'Media Trial', hint: 'Tuduh seorang pemain sebagai watak tertentu' },
     ];
-    case 'bureaucrat': return [{ id: 'special', label: 'Palsukan Bukti', hint: 'Sekali sepanjang game' }];
-    case 'lawyer': return [{ id: 'special', label: 'Pembelaan Undang-undang', hint: 'Kurangkan 50% penalti wang seterusnya' }];
-    case 'ally': return [{ id: 'special', label: 'Perikatan Pelindung', hint: 'Lindungi pemain lain, +100 Influence jika berjaya' }];
-    case 'populist': return [{ id: 'special', label: 'Kempen Awam', hint: `+${pcfg.campaignTrust}% kepercayaan awam, +${pcfg.campaignInfluence} Influence` }];
-    case 'opportunist': return [{ id: 'special', label: 'Copycat Politics', hint: 'Jadi salinan satu watak dalam permainan, untuk selamanya' }];
     case 'kingmaker': return [
-      { id: 'special.powerBroker', label: 'Power Broker', hint: `Pindah ${kcfg.powerBrokerMin}-${kcfg.powerBrokerMax} Influence, +${kcfg.powerBrokerBonus} bonus` },
-      { id: 'special.endorsement', label: 'Sokongan Rasmi', hint: 'Sekali sepanjang game' },
-      { id: 'special.withdrawRenew', label: 'Sambung / Tarik Balik', hint: 'Untuk sokongan yang aktif' },
-      { id: 'special.bonusVote', label: 'Undi Berganda', hint: 'Satu undi tambahan dalam sidang Parlimen' },
+      { id: 'special.powerBroker', name: 'Power Broker', hint: `Pindah ${kcfg.powerBrokerMin}-${kcfg.powerBrokerMax} Influence, +${kcfg.powerBrokerBonus} bonus` },
+      { id: 'special.endorsement', name: 'Official Endorsement', hint: 'Sekali sepanjang game, diumumkan kepada semua' },
+      { id: 'special.withdrawRenew', name: 'Withdraw / Renew', hint: 'Untuk sokongan yang aktif' },
     ];
-    default: return [];
+    case 'populist': {
+      return [{ id: 'special', name: c.special.name, hint: `+${pcfg.campaignTrust}% Public Trust dan +${pcfg.campaignInfluence} Influence (diri sendiri atau pemain lain)` }];
+    }
+    default: return [{ id: 'special', name: c.special.name, hint: c.special.summary }];
   }
 }
 
-function powerState(power, charId, s, me) {
-  const myTurn = s.activePlayerId === me.id && !s.skipping && !s.pendingVote && !s.characterReveal;
+function powerState(power, charId, s, me, myTurn) {
   const status = getAbilityStatus(me, power.id, s.round);
   const freeCommission = s.shadow?.event?.id === 'anti-corruption-commission'
     && (charId === 'spy' || charId === 'whistleblower' || power.id === 'special.report');
-  let ready = status.ready || freeCommission;
-  let note = '';
-  if (freeCommission && !status.ready) note = 'Percuma (Suruhanjaya)';
-  else if (status.ready) note = status.usesLeft !== null ? `Sedia (${status.usesLeft} lagi)` : 'Sedia';
-  else if (status.reason === 'cooldown') note = `Cooldown ${status.roundsLeft} ronda`;
-  else note = 'Sudah digunakan';
+  const ready = status.ready || freeCommission;
+  let text;
+  if (freeCommission && !status.ready) text = 'Percuma (Suruhanjaya)';
+  else if (status.ready) text = 'Sedia';
+  else if (status.reason === 'cooldown') text = `Sedia dalam ${status.roundsLeft} ronda`;
+  else text = 'Telah digunakan';
 
   const mine = (s.shadow?.endorsements || []).some((e) => e.kingmakerId === me.id);
   let enabled = ready && myTurn;
-  if (!myTurn && ready) note = 'Pada giliran anda';
-  if (power.id === 'special.bonusVote') {
-    enabled = ready && Boolean(s.pendingVote);
-    if (ready) note = s.pendingVote ? 'Aktifkan sekarang' : 'Hanya semasa sidang Parlimen';
+  if (!myTurn && ready) text = 'Tunggu giliran anda';
+  if (ready && myTurn && charId === 'populist') {
+    const cost = Math.max(pcfg.campaignMinCost, Math.floor((Math.max(me.money, 0) * pcfg.campaignCostPercent) / 100));
+    text = `Kos ${formatMoney(cost)}`;
   }
-  if (power.id === 'special.withdrawRenew') {
-    ready = ready && mine;
-    enabled = ready && myTurn;
-    if (!mine) note = 'Tiada sokongan aktif';
-  }
-  if (power.id === 'special.endorsement' && mine && status.ready) { enabled = false; note = 'Sokongan masih aktif'; }
-  return { enabled, note };
+  if (power.id === 'special.withdrawRenew' && !mine) { enabled = false; text = 'Tiada sokongan aktif'; }
+  if (power.id === 'special.endorsement' && mine && status.ready) { enabled = false; text = 'Sokongan masih aktif'; }
+  return { enabled, status: text };
 }
 
-function renderPowers(s, me) {
-  const box = $('#character-powers');
-  const charId = effectiveId(me);
-  const powers = powersFor(charId);
-  box.innerHTML = '';
-  if (me.character?.copiedId) {
-    box.appendChild(el('p', 'power-copy', `Anda telah menyalin ${getCharacter(me.character.copiedId)?.name || ''} untuk selamanya.`));
+function cardFor(me, s, myTurn, charId, { asCopy = false } = {}) {
+  const character = getCharacter(charId);
+  const powers = (asCopy ? [] : powersFor(charId)).map((p) => ({ ...p, title: p.hint, ...powerState(p, charId, s, me, myTurn) }));
+  if (asCopy) {
+    // The Opportunist's own card: its one special is spent for good.
+    powers.push({ id: 'special', name: character.special.name, status: 'Telah digunakan', enabled: false });
   }
-  if (charId === 'cleanPolitician') {
-    box.appendChild(el('p', 'power-copy', 'Bila ada tawaran Backroom Deal, anda boleh Terima, Tolak atau Dedah tawaran itu.'));
+  let funding = null;
+  if (charId === 'moneyMan' && !asCopy) {
+    const ready = powers[0]?.enabled;
+    const reason = powers[0]?.status || '';
+    funding = {
+      players: (me.intel?.dirtyIds || []).map((id) => s.players.find((p) => p.id === id)).filter(Boolean).map((p) => ({
+        id: p.id, name: p.name, detail: `Dirty Politics · Wang ${formatMoney(p.money)}`, enabled: Boolean(ready), status: reason,
+      })),
+    };
+    powers.length = 0; // the funding block carries the buttons
   }
-  if (!powers.length) return;
-  powers.forEach((power) => {
-    const { enabled, note: status } = powerState(power, charId, s, me);
-    const row = el('button', `power-btn${enabled ? '' : ' is-off'}`);
-    row.type = 'button';
-    row.disabled = !enabled;
-    const text = el('span', 'power-text');
-    text.appendChild(el('b', '', power.label));
-    text.appendChild(el('small', '', power.hint));
-    row.appendChild(text);
-    row.appendChild(el('span', 'power-status', status));
-    row.addEventListener('click', () => {
-      sound.playClick();
-      (FLOWS[charId] || (() => {}))(power.id);
-    });
-    box.appendChild(row);
+  let info = null;
+  if (charId === 'bureaucrat' && me.abilityState?.falsifiedSlot !== undefined && me.abilityState?.falsifiedSlot !== null) {
+    const f = s.players.find((p) => p.slot === me.abilityState.falsifiedSlot);
+    if (f) info = { title: 'Bukti dipalsukan', text: `Anda telah memalsukan bukti tentang ${f.name}. Perisik dan Wartawan melihat rekod palsu tentang dia.` };
+  }
+  return buildCharacterCard(character, {
+    powers,
+    funding,
+    info,
+    asCopy,
+    note: asCopy ? 'Kad asal anda. Satu kuasa Copycat sudah digunakan; anda kini memegang salinan di bawah.' : null,
+    onPower: (id) => (FLOWS[charId] || (() => {}))(id),
+    onFund: (id) => FLOWS.moneyMan('special', id),
   });
+}
+
+let cardSignature = '';
+
+function renderPowers(s, me) {
+  const host = $('#character-cards');
+  const charId = effectiveId(me);
+  const myTurn = s.activePlayerId === me.id && !s.skipping && !s.pendingVote && !s.characterReveal;
+  const copied = Boolean(me.character?.copiedId);
+  const sig = JSON.stringify([charId, copied, myTurn, s.round, me.money, me.influence, me.abilityState, me.intel, (s.shadow?.endorsements || []).length, s.shadow?.event?.id, s.players.map((p) => `${p.id}:${p.money}`).join()]);
+  if (sig === cardSignature && host.childElementCount) return;
+  cardSignature = sig;
+  host.innerHTML = '';
+  if (!charId) return;
+  if (copied) host.appendChild(cardFor(me, s, myTurn, me.character.id, { asCopy: true }));
+  host.appendChild(cardFor(me, s, myTurn, charId));
 }
 
 // The newest intelligence the player gathered (reports vanish from the dialog
@@ -399,31 +470,62 @@ export function endScreenCharacterLine(player) {
 
 // ---------- the host's answers ----------
 
+// A found Dirty Deal, opened: the Whistleblower sees who was in it and may Dedahkan it.
+function showDealDetail(r, v, dealNo) {
+  const box = el('div');
+  const targetIsInitiator = v.role === 'initiator';
+  const initiator = targetIsInitiator ? nameOf(r.targetId) : v.counterpartyName;
+  const recipient = targetIsInitiator ? v.counterpartyName : nameOf(r.targetId);
+  const value = [v.money ? formatMoney(v.money) : '', v.influence ? `${v.influence} Influence` : ''].filter(Boolean).join(' + ');
+  const dl = el('dl', 'power-facts');
+  [['Pemula', initiator], ['Penerima', recipient], ['Jenis', v.dealLabel], ['Nilai', value || '-'], ['Ronda', String(v.round)]]
+    .forEach(([k, val]) => { dl.appendChild(el('dt', '', k)); dl.appendChild(el('dd', '', val)); });
+  box.appendChild(dl);
+  box.appendChild(note('Jika didedahkan, pemula dan penerima dikenakan penalti dan deal ini menjadi berita awam. Tidak boleh dibatalkan.'));
+  const go = el('button', 'menu-btn menu-btn-primary power-danger');
+  go.type = 'button';
+  go.appendChild(el('span', 'menu-btn-label', 'Dedahkan'));
+  go.addEventListener('click', () => { sound.playClick(); closePower(); match.useAbility('follow', { viewId: v.viewId }); });
+  box.appendChild(go);
+  openPower(`Dirty Deal ${dealNo}`, 'Pembocor Rahsia', box);
+}
+
 function showViews(r) {
   const box = el('div');
   const isJournalist = r.investigator === 'journalist';
-  box.appendChild(note(`${nameOf(r.targetId)}: ${r.evidenceCount} rekod tersembunyi · kepercayaan awam ${r.publicTrust}%.`));
+  const dl = el('dl', 'power-facts');
+  const facts = [['Dirty Deal', String(r.evidenceCount)]];
+  if (isJournalist) {
+    facts.push([`Wang ${nameOf(r.targetId)}`, formatMoney(r.money)], ['Skandal', `${r.scandal}%`]);
+  }
+  facts.push(['Kepercayaan awam', `${r.publicTrust}%`]);
   if (isJournalist && r.targetCategory) {
     categoryClues[r.targetId] = { category: r.targetCategory, label: r.targetCategoryLabel };
-    box.appendChild(note(`Petunjuk watak: ${nameOf(r.targetId)} ialah watak ${r.targetCategoryLabel}. Berguna untuk Perbicaraan Media.`));
+    facts.push(['Petunjuk watak', `${r.targetCategoryLabel}`]);
   }
+  facts.forEach(([k, v]) => { dl.appendChild(el('dt', '', k)); dl.appendChild(el('dd', '', v)); });
+  box.appendChild(dl);
+  if (isJournalist && r.targetCategory) box.appendChild(note('Petunjuk watak diingati dan mengecilkan pilihan bila anda membuat Media Trial.'));
   if (!r.views.length) {
-    box.appendChild(note('Tiada deal tersembunyi untuk didedahkan.'));
+    box.appendChild(note('Tiada Dirty Deal untuk diterbitkan.'));
   } else {
     box.appendChild(note(isJournalist
-      ? 'Pilih SATU bukti untuk diterbitkan. Jika bukti itu palsu, anda yang rugi.'
-      : 'Pilih SATU deal untuk didedahkan. Anda tidak boleh ditipu.'));
-    box.appendChild(listOf(r.views.map((v) => {
-      const value = [v.money ? formatMoney(v.money) : '', v.influence ? `${v.influence} Influence` : ''].filter(Boolean).join(' + ');
-      return choiceRow(
-        `${v.role === 'initiator' ? 'Pemula' : 'Penerima'} dengan ${v.counterpartyName}`,
-        `${v.dealLabel}${value ? ` · ${value}` : ''} · ronda ${v.round}`,
-        () => { closePower(); match.useAbility('follow', { viewId: v.viewId }); },
-      );
-    })));
+      ? 'Pilih SATU Dirty Deal untuk diterbitkan. Nama pemain yang terlibat tidak ditunjukkan.'
+      : 'Pilih satu Dirty Deal untuk melihat butirannya. Anda tidak boleh ditipu oleh bukti palsu.'));
+    box.appendChild(listOf(r.views.map((v, i) => choiceRow(
+      `Deal ${v.dealNo || i + 1}`,
+      isJournalist ? 'Terbitkan deal ini' : 'Lihat butiran dan dedahkan',
+      () => {
+        if (isJournalist) { closePower(); match.useAbility('follow', { viewId: v.viewId }); } else showDealDetail(r, v, v.dealNo || i + 1);
+      },
+    ))));
   }
   openPower(isJournalist ? 'Bukti ditemui' : 'Deal ditemui', isJournalist ? 'Wartawan' : 'Pembocor Rahsia', box);
-  addJournal(`Siasatan ${nameOf(r.targetId)}`, [`${r.evidenceCount} rekod tersembunyi`, ...r.views.map((v) => `${v.role === 'initiator' ? 'Pemula' : 'Penerima'} dengan ${v.counterpartyName}: ${v.dealLabel}, ronda ${v.round}`)]);
+  addJournal(`Siasatan ${nameOf(r.targetId)}`, [
+    `${r.evidenceCount} Dirty Deal`,
+    ...(isJournalist ? [`Wang ${formatMoney(r.money)}, Skandal ${r.scandal}%, kepercayaan awam ${r.publicTrust}%`] : []),
+    ...(isJournalist && r.targetCategoryLabel ? [`Petunjuk watak: ${r.targetCategoryLabel}`] : []),
+  ]);
 }
 
 function showSpyReport(r) {
@@ -435,8 +537,24 @@ function showSpyReport(r) {
   clues.forEach((c) => { dl.appendChild(el('dt', '', c.label)); dl.appendChild(el('dd', '', c.text)); });
   if (clues.length) box.appendChild(dl);
   box.appendChild(note('Maklumat ini mungkin tidak benar jika seorang Birokrat campur tangan.'));
+  if (r.deals?.length) {
+    box.appendChild(note('Pilih SATU Dirty Deal untuk disiasat: antara siapa?'));
+    box.appendChild(listOf(r.deals.map((d) => choiceRow(`Deal ${d.dealNo}`, 'Siasat deal ini', () => { closePower(); match.useAbility('follow', { viewId: d.viewId }); }))));
+  }
   openPower('Laporan Risikan', 'Perisik', box);
   addJournal(`Risikan ${nameOf(r.targetId)} (${CATEGORY_NAMES[r.report.category] || ''})`, clues.length ? clues.map((c) => `${c.label}: ${c.text}`) : ['Tiada apa-apa ditemui']);
+}
+
+function showSpyDeal(d) {
+  const box = el('div');
+  const value = [d.money ? formatMoney(d.money) : '', d.influence ? `${d.influence} Influence` : ''].filter(Boolean).join(' + ');
+  const dl = el('dl', 'power-facts');
+  [['Pemula', d.initiatorName], ['Penerima', d.recipientName], ['Jenis', d.dealLabel], ['Nilai (anggaran)', value || '-'], ['Ronda', String(d.round)]]
+    .forEach(([k, v]) => { dl.appendChild(el('dt', '', k)); dl.appendChild(el('dd', '', v)); });
+  box.appendChild(dl);
+  box.appendChild(note('Maklumat ini mungkin tidak benar jika salah seorang yang terlibat dilindungi Birokrat.'));
+  openPower('Dirty Deal: antara siapa?', 'Perisik', box);
+  addJournal('Dirty Deal disiasat', [`${d.initiatorName} dan ${d.recipientName}: ${d.dealLabel}, ronda ${d.round}`]);
 }
 
 function showCopyPicker(options) {
@@ -472,6 +590,7 @@ function onAbilityResult(r) {
     else { hooks.showToast(`Tiada bukti ditemui tentang ${target}.`, 4500); addJournal(`Siasatan ${target}`, ['Tiada bukti ditemui']); }
     return undefined;
   }
+  if (r.kind === 'spy-deal') { showSpyDeal(r.deal); return undefined; }
   if (r.abilityId === 'follow') {
     if (r.success) { hooks.showToast('Fail 101 didedahkan! Tahniah.', 5000); sound.playPromotion(); }
     else { hooks.showToast(r.text || 'Laporan anda tidak dapat disahkan.', 7000); sound.playWarning(); }
@@ -479,10 +598,15 @@ function onAbilityResult(r) {
   }
   if (r.pending) { hooks.showToast(`Tuduhan dihantar kepada ${nameOf(r.targetId)}. Menunggu jawapan.`, 5000); return undefined; }
   if (r.amount !== undefined && r.bonus !== undefined) { hooks.showToast(`Power Broker: ${r.amount} Influence dipindahkan, anda dapat +${r.bonus} bonus.`, 5000); sound.playCoins(); return undefined; }
-  if (r.cost !== undefined) { hooks.showToast(`Kempen berjaya! −${formatMoney(r.cost)}, +${r.trust}% kepercayaan awam, +${r.influence} Influence.`, 5500); sound.playPromotion(); return undefined; }
+  if (r.cost !== undefined) {
+    hooks.showToast(r.forName
+      ? `Kempen untuk ${r.forName} berjaya! −${formatMoney(r.cost)}, dia +${r.trust}% kepercayaan awam, anda +${r.influence} Influence.`
+      : `Kempen berjaya! −${formatMoney(r.cost)}, +${r.trust}% kepercayaan awam, +${r.influence} Influence.`, 5500);
+    sound.playPromotion();
+    return undefined;
+  }
   if (r.mode === 'renew') { hooks.showToast(`Sokongan disambung sehingga ronda ${r.expiresRound}.`, 4500); return undefined; }
   if (r.mode === 'withdraw') { hooks.showToast('Sokongan ditarik balik dan diumumkan.', 4500); return undefined; }
-  if (r.armed) { hooks.showToast('Undi berganda diaktifkan. Anda mesti mengundi untuk menggunakannya.', 5500); return undefined; }
   if (r.expiresRound) { hooks.showToast(`Sokongan rasmi diumumkan. Sah sehingga ronda ${r.expiresRound}.`, 5000); sound.playPromotion(); return undefined; }
   const me = localOf(snap());
   const id = effectiveId(me);
@@ -494,7 +618,7 @@ function onAbilityResult(r) {
 
 const QUIET_NOTICES = new Set(['public-support', 'endorsement-pay']);
 const NOTICE_ICONS = {
-  shield: '🛡️', investigated: '🕵️', 'deal-alert': '🔔', 'trial-won': '🎙️', 'trial-lost': '⚖️', 'trial-cleared': '✅',
+  shield: '🛡️', investigated: '🕵️', 'deal-alert': '🔔', 'trial-won': '🎙️', 'trial-lost': '⚖️', 'trial-cleared': '✅', 'trial-lied': '🤥', 'trial-unproven': '❔', 'campaign-for-you': '📣',
   'power-broker': '🤝', 'scandal-damage': '📉', 'political-liability': '📉', 'endorsement-expired': '⌛',
   'shield-used': '🛡️', 'ally-bonus': '⭐',
 };
@@ -515,11 +639,11 @@ function onMediaTrial(t) {
   clearInterval(trialTimer);
   $('#trial-text').textContent = t.text;
   $('#trial-overlay').dataset.trialId = t.trialId;
-  const deadline = Date.now() + GAME_BALANCE.characters.mediaTrial.responseMs;
+  const deadline = Date.now() + mcfg.responseMs;
   const tick = () => {
     const left = Math.max(0, deadline - Date.now());
     $('#trial-countdown').textContent = `${Math.ceil(left / 1000)}s`;
-    if (left <= 0) hideTrial(); // the host counts silence as a challenge
+    if (left <= 0) hideTrial(); // the host counts silence as denying
   };
   tick();
   trialTimer = setInterval(tick, 500);
@@ -549,14 +673,10 @@ export function initCharacterUi(callbacks) {
     match.respondToMediaTrial($('#trial-overlay').dataset.trialId, true);
     hideTrial();
   });
-  $('#btn-trial-challenge').addEventListener('click', () => {
+  $('#btn-trial-deny').addEventListener('click', () => {
     sound.playClick();
     match.respondToMediaTrial($('#trial-overlay').dataset.trialId, false);
     hideTrial();
-  });
-  $('#btn-bonus-vote').addEventListener('click', () => {
-    sound.playClick();
-    match.useAbility('special.bonusVote', {});
   });
   bus.on('match:ability-result', (e) => onAbilityResult(e.detail));
   bus.on('match:ability-notice', (e) => onAbilityNotice(e.detail));
@@ -572,15 +692,9 @@ export function renderCharacterUi(snapshot) {
   lastRoundSeen = snapshot.round;
   const me = localOf(snapshot);
   const active = Boolean(me?.character);
-  $('#character-powers-wrap').hidden = !active;
   renderShadowBanner(snapshot);
   renderTrust(me);
-  // The Kingmaker's "Undi Berganda" lives in the Parliament overlay too.
-  const bonus = $('#btn-bonus-vote');
-  const isKingmaker = active && effectiveId(me) === 'kingmaker';
-  const ready = isKingmaker && getAbilityStatus(me, 'special.bonusVote', snapshot.round).ready;
-  bonus.hidden = !(ready && snapshot.pendingVote);
-  if (!active) return;
+  if (!active) { cardSignature = ''; return; }
   renderPowers(snapshot, me);
   renderJournal();
 }

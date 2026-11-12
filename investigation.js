@@ -7,14 +7,15 @@
 // Journalist see forged views of that player's tokens (wrong counterparty,
 // wrong amounts). The real token and the real guilt never change, and the
 // Whistleblower is not fooled. A Journalist who publishes a forged view gets
-// nothing exposed and pays for it (applyForgedReportPenalty).
+// the same report as a genuine one, with a random name as the other party;
+// nothing real is exposed and nobody is told.
 //
 // Registry (forged players, forged copies, views) is host-private and reset
 // with every match.
 
 import { GAME_BALANCE } from './balance.js';
 import { getCharacter, CHARACTERS, isCharacterActive } from './characters.js';
-import { getTokens, getTokensInvolving } from './evidence.js';
+import { getTokens, getToken, getTokensInvolving } from './evidence.js';
 import { characterIdOf, reduceMoneyPenalty } from './abilities.js';
 import { adjustBalance, applyApprovalDelta } from './effects.js';
 
@@ -81,8 +82,11 @@ export function isFalsified(slot) {
 
 // ---------- Views of Evidence Tokens ----------
 
-const DEAL_LABELS = { plain: 'Deal biasa', vote: 'Deal undian', noharm: 'Deal jangan serang', sabotage: 'Deal sabotaj', nopolitik: 'Deal jangan Politik' };
-const DEAL_TYPES = Object.keys(DEAL_LABELS);
+const DEAL_LABELS = {
+  plain: 'Deal biasa', vote: 'Deal undian', noharm: 'Deal jangan serang', sabotage: 'Deal sabotaj', nopolitik: 'Deal jangan Politik',
+  powerBroker: 'Deal Power Broker', endorsement: 'Deal Sokongan Rasmi',
+};
+const DEAL_TYPES = ['plain', 'vote', 'noharm', 'sabotage', 'nopolitik']; // what a forged copy may claim
 export const dealLabel = (type) => DEAL_LABELS[type] || DEAL_LABELS.plain;
 
 function forgedCopyOf(token, target, players) {
@@ -121,22 +125,35 @@ function fieldsOf(token, target, players, forged) {
 }
 
 // Registers a view the investigator can later act on (publish / expose).
-function registerView(viewerSlot, token, forged, turnKey) {
+function registerView(viewerSlot, token, forged, turnKey, targetSlot) {
   viewSeq += 1;
   const viewId = `view-${viewSeq}`;
-  views.set(viewId, { viewerSlot, tokenId: token.id, forged, turnKey });
+  views.set(viewId, { viewerSlot, tokenId: token.id, forged, turnKey, targetSlot });
   return viewId;
 }
 
-// Full views of the target's hidden (not yet exposed) tokens. Journalist and
-// Whistleblower use this; only the Journalist is ever shown forged ones.
+// Full views of the target's hidden (not yet exposed) tokens. Journalist, Spy and
+// Whistleblower use this; only the Whistleblower is never shown forged ones.
 export function buildFullViews(viewerKind, viewer, target, players, turnKey) {
-  const fooled = viewerKind === 'journalist' && forgedSlots.has(target.slot);
+  const fooled = viewerKind !== 'whistleblower' && forgedSlots.has(target.slot);
   return getTokensInvolving(target.slot, { includeExposed: false }).map((token) => ({
-    viewId: registerView(viewer.slot, token, fooled, turnKey),
+    viewId: registerView(viewer.slot, token, fooled, turnKey, target.slot),
     ...fieldsOf(token, target, players, fooled),
     dealLabel: dealLabel(fieldsOf(token, target, players, fooled).dealType),
   }));
+}
+
+// What a stored view shows (genuine or forged alike): who is on each side, the type,
+// the value and the round. The caller decides who may see names.
+export function viewDetails(view, players) {
+  const token = getToken(view.tokenId);
+  const target = players.find((p) => p.slot === view.targetSlot);
+  if (!token || !target) return null;
+  const f = fieldsOf(token, target, players, view.forged);
+  const other = players.find((p) => p.id === f.counterpartyId);
+  const initiator = f.role === 'initiator' ? target : other;
+  const recipient = f.role === 'initiator' ? other : target;
+  return { ...f, initiatorName: initiator?.name || f.counterpartyName, recipientName: recipient?.name || f.counterpartyName, dealLabel: dealLabel(f.dealType) };
 }
 
 // What a Journalist may act on: the stored view, only on the turn it was made.
@@ -203,7 +220,7 @@ export function spyReport(spy, target, category, players, round) {
     clues = pickClues([
       { label: 'Skandal', text: `${target.scandal}%` },
       { label: 'Kepercayaan awam', text: `${target.approval}%` },
-      { label: 'Rekod bukti tersembunyi', text: String(tokens.filter((t) => !t.exposed).length) },
+      { label: 'Dirty Deal', text: String(tokens.filter((t) => !t.exposed).length) },
       { label: 'Pernah didedah', text: tokens.some((t) => t.exposed) ? 'Ya' : 'Tidak' },
     ], count);
   } else if (category === 'abilities') {
@@ -218,8 +235,6 @@ export function spyReport(spy, target, category, players, round) {
     tokens.forEach((token) => {
       const f = fieldsOf(token, target, players, fooled);
       const pool = [
-        { label: 'Rakan', text: f.counterpartyName },
-        { label: 'Peranan', text: f.role === 'initiator' ? 'Pemula' : 'Penerima' },
         { label: 'Jenis', text: dealLabel(f.dealType) },
         { label: 'Nilai', text: [f.money ? `RM${f.money.toLocaleString('en-US')}` : '', f.influence ? `${f.influence} Influence` : ''].filter(Boolean).join(' + ') },
         { label: 'Ronda', text: String(f.round) },
@@ -230,7 +245,7 @@ export function spyReport(spy, target, category, players, round) {
   return { category, clues };
 }
 
-// ---------- Penalties for the Journalist ----------
+// ---------- Penalty for the Journalist ----------
 
 // Takes money (shield-eligible, never below zero) and Public Trust.
 function penalise(player, money, trust, players) {
@@ -242,25 +257,38 @@ function penalise(player, money, trust, players) {
 }
 
 export const applyDefamation = (journalist, players) => penalise(journalist, cfg.defamation.money, cfg.defamation.trust, players);
-export const applyForgedReportPenalty = (journalist, players) => penalise(journalist, cfg.forgedReport.money, cfg.forgedReport.trust, players);
 
 // ---------- Media Trial ----------
 
 export const isCharacterId = (id) => CHARACTERS.some((c) => c.id === id && isCharacterActive(c.id));
 
-// Settles an accusation of identity. `admit` only matters when it is right.
-// Returns { correct, confirmed, accusedTrust, journalistInfluence, defamation }.
+// Settles an accusation of identity. The accused answers `admit` (true: "Betul,
+// diakui") or denies it (false: "Tuduhan salah"); the host checks the truth.
+//   right + admitted   accused -admitTrust, Journalist +Influence, the character is revealed
+//   right + denied     accused -lieTrust (lied), Journalist +Influence, nothing public but the denial
+//   wrong + denied     Journalist is defamed, the accused loses nothing
+//   wrong + admitted   accused -lieTrust (lied), the Journalist is NOT penalised, the public
+//                      only sees that the accused did not plead guilty
+// Returns { correct, publicKind: 'revealed' | 'refuted' | 'not-guilty', accusedTrust,
+//           journalistInfluence, defamation }.
 export function resolveMediaTrial(journalist, accused, claimedId, admit, players) {
   const correct = characterIdOf(accused) === claimedId;
-  if (!correct) {
-    // Whatever the accused said, a wrong accusation is a challenge, and the
-    // Journalist pays; the accused loses nothing.
-    return { correct: false, confirmed: false, accusedTrust: 0, journalistInfluence: 0, defamation: applyDefamation(journalist, players) };
-  }
   const t = cfg.mediaTrial;
-  const trust = admit ? t.admitTrust : t.challengeTrust;
-  const before = accused.approval;
-  applyApprovalDelta(accused, -trust);
-  const gained = adjustBalance(journalist, 'influence', t.journalistInfluence);
-  return { correct: true, confirmed: true, accusedTrust: before - accused.approval, journalistInfluence: gained, defamation: null };
+  const out = { correct, publicKind: 'refuted', accusedTrust: 0, journalistInfluence: 0, defamation: null };
+  const hit = (trust) => {
+    const before = accused.approval;
+    applyApprovalDelta(accused, -trust);
+    return before - accused.approval;
+  };
+  if (correct) {
+    out.accusedTrust = hit(admit ? t.admitTrust : t.lieTrust);
+    out.journalistInfluence = adjustBalance(journalist, 'influence', t.journalistInfluence);
+    out.publicKind = admit ? 'revealed' : 'refuted';
+  } else if (admit) {
+    out.accusedTrust = hit(t.lieTrust);
+    out.publicKind = 'not-guilty';
+  } else {
+    out.defamation = applyDefamation(journalist, players);
+  }
+  return out;
 }

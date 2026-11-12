@@ -149,7 +149,8 @@ export function decideBotAction(bot, players, offers, plan = {}) {
 export function decideDealProposal(bot, players, ctx = {}) {
   if (!ctx.force && Math.random() * 100 >= cfg.actionWeights.dealPropose) return null;
 
-  const rivals = players.filter((p) => p.id !== bot.id);
+  // `ctx.allowedIds`: the only players the offer may go to (Money Man: Dirty Politics holders).
+  const rivals = players.filter((p) => p.id !== bot.id && (!ctx.allowedIds || ctx.allowedIds.includes(p.id)));
   if (!rivals.length) return null;
 
   const distance = (p) => Math.abs(RANKS.indexOf(p.rank) - RANKS.indexOf(bot.rank));
@@ -246,7 +247,7 @@ export function decideBotSpecial(bot, players, ctx) {
         ? { abilityId: 'special', payload: { characterId: randomChoice(ctx.copyOptions) } }
         : null;
     case 'kingmaker': {
-      // Bonus Voting Power stays unused: bots do not vote.
+      // Bonus Voting Power is passive: nothing for a bot to do.
       if (ctx.endorsement) {
         const endorsed = players.find((p) => p.slot === ctx.endorsement.targetSlot);
         if (!ctx.ready('special.withdrawRenew')) return null;

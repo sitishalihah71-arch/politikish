@@ -19,12 +19,10 @@ const pcfg = GAME_BALANCE.characters.populist;
 // Each Kingmaker has at most one endorsement at a time. Normally there is one
 // Kingmaker, but an Opportunist can copy the card, so this is keyed by slot.
 let endorsements = new Map(); // kingmakerSlot -> { kingmakerSlot, targetSlot, expiresRound, renewed, liabilityDone }
-let bonusVoters = new Set(); // slots that armed Bonus Voting Power for the open vote
 let exposedSlots = new Set(); // everyone who has been confirmed exposed this match
 
 export function resetManeuvers() {
   endorsements = new Map();
-  bonusVoters = new Set();
   exposedSlots = new Set();
 }
 
@@ -138,28 +136,10 @@ export function startOfRound(round, players) {
   return out;
 }
 
-// ---------- Kingmaker: Bonus Voting Power ----------
+// ---------- Kingmaker: Bonus Voting Power (passive) ----------
 
-// Arms the extra vote for the open session. Not spent until the session closes
-// and the Kingmaker actually voted (see consumeBonusVotes).
-export function armBonusVote(kingmaker) {
-  if (bonusVoters.has(kingmaker.slot)) return { ok: false, reason: 'already-armed' };
-  bonusVoters.add(kingmaker.slot);
-  return { ok: true };
-}
-
-export const hasBonusVote = (player) => bonusVoters.has(player.slot);
-
-// A vote's weight: 1, or 2 for a Kingmaker with an armed bonus.
-export const voteWeight = (player) => (bonusVoters.has(player.slot) ? 1 + kcfg.bonusVotes : 1);
-
-// The session is over: returns the Kingmakers whose bonus really counted (they
-// voted) so the caller spends their once-per-game use, and clears the rest.
-export function closeBonusVotes(players, votes) {
-  const spent = players.filter((p) => bonusVoters.has(p.slot) && (votes[p.id] === 'yes' || votes[p.id] === 'no'));
-  bonusVoters = new Set();
-  return spent;
-}
+// A vote's weight: 1, or 2 for a Kingmaker (a copying Opportunist too), every time.
+export const voteWeight = (player) => (characterIdOf(player) === 'kingmaker' ? 1 + kcfg.bonusVotes : 1);
 
 // ---------- Populist: Public Campaign ----------
 
@@ -167,15 +147,17 @@ export function campaignCost(player) {
   return Math.max(pcfg.campaignMinCost, Math.floor((Math.max(player.money, 0) * pcfg.campaignCostPercent) / 100));
 }
 
+// A campaign for yourself (default) or for another player: the beneficiary gets
+// the Public Trust, the Populist always pays the cost and gets the Influence.
 // reason codes: 'insufficient-funds'
-export function runCampaign(populist) {
+export function runCampaign(populist, beneficiary = populist) {
   const cost = campaignCost(populist);
   if (!(populist.money >= cost)) return { ok: false, reason: 'insufficient-funds', cost };
   adjustBalance(populist, 'money', -cost);
-  const before = populist.approval;
-  applyApprovalDelta(populist, pcfg.campaignTrust);
+  const before = beneficiary.approval;
+  applyApprovalDelta(beneficiary, beneficiary === populist ? pcfg.campaignTrust : pcfg.campaignOtherTrust);
   const influence = adjustBalance(populist, 'influence', pcfg.campaignInfluence);
-  return { ok: true, cost, trust: populist.approval - before, influence };
+  return { ok: true, cost, trust: beneficiary.approval - before, influence, forOther: beneficiary !== populist };
 }
 
 // ---------- Exposure reactions ----------

@@ -17,7 +17,7 @@ import { getProjekReward } from './projects.js';
 import { buildActionStory } from './stories.js';
 import { describeCondition, getNextVoteRound, splitPayment } from './backroomDeals.js';
 import { activeCharacters, CATEGORY_LABELS as CHARACTER_CATEGORY_LABELS, getCharacter } from './characters.js';
-import { initCharacterReveal, getCardArt } from './characterReveal.js';
+import { initCharacterReveal } from './characterReveal.js';
 import { initCharacterUi, renderCharacterUi, publicCharacterTag, endScreenCharacterLine } from './characterUi.js';
 
 let settings = loadSettings();
@@ -517,6 +517,7 @@ const ACTION_REJECT_MESSAGES = {
   cooldown: 'Kuasa itu masih dalam cooldown.',
   'limit-reached': 'Kuasa itu sudah habis digunakan.',
   'cannot-initiate-deal': 'Watak anda tidak boleh memulakan Backroom Deal.',
+  'funding-dirty-only': 'Secret Funding hanya boleh diberi kepada pemain yang memegang watak Dirty Politics.',
   'deal-not-found': 'Tawaran itu sudah tiada.',
   'inquiry-blocked': 'Siasatan Parlimen sedang berjalan: kuasa itu tidak boleh digunakan sekarang.',
   'endorsement-active': 'Anda sudah ada sokongan rasmi yang aktif.',
@@ -973,26 +974,6 @@ function renderSecretObjective(localPlayer) {
   statusEl.classList.toggle('is-complete', completed);
 }
 
-// The local player's own secret character. Like the secret objective, it only
-// ever exists on the local player's own entry (match.js's maskPlayersFor
-// strips it from everyone else's until the match ends).
-function makeAbilityRow(term, name, summary, options = []) {
-  const dt = document.createElement('dt');
-  dt.textContent = term;
-  const dd = document.createElement('dd');
-  const title = document.createElement('b');
-  title.textContent = name;
-  dd.appendChild(title);
-  dd.appendChild(document.createTextNode(summary));
-  options.forEach((option) => {
-    const line = document.createElement('span');
-    line.className = 'character-option';
-    line.textContent = `• ${option.name}${option.summary ? `: ${option.summary}` : ''}`;
-    dd.appendChild(line);
-  });
-  return [dt, dd];
-}
-
 let shownCharacterId = null;
 
 function renderCharacterPanel(localPlayer) {
@@ -1008,24 +989,6 @@ function renderCharacterPanel(localPlayer) {
   if (shownCharacterId === character.id) return; // nothing changes mid-match yet
   shownCharacterId = character.id;
 
-  $('#character-name').textContent = character.name;
-  const thumb = $('#character-thumb');
-  const art = getCardArt(character.id);
-  thumb.hidden = !art;
-  if (art) thumb.src = art;
-  $('#character-category').textContent = CHARACTER_CATEGORY_LABELS[character.category];
-  $('#character-role').textContent = character.role;
-  const list = $('#character-abilities');
-  list.innerHTML = '';
-  const rows = [
-    makeAbilityRow('Special Ability', character.special.name, character.special.summary, character.special.options || []),
-    makeAbilityRow('Passive Ability', character.passive.name, character.passive.summary),
-    makeAbilityRow('Weakness', character.weakness.name, character.weakness.summary),
-  ];
-  rows.forEach(([dt, dd]) => {
-    list.appendChild(dt);
-    list.appendChild(dd);
-  });
 }
 
 function renderHowtoCharacters() {
@@ -1310,15 +1273,24 @@ function openTargetPicker(context) {
     $('#kabel-banner').hidden = true;
     const listEl = $('#target-picker-list');
     listEl.innerHTML = '';
-    snapshot.players
-      .filter((p) => p.id !== localPlayer.id && p.connected)
-      .forEach((player) => {
-        listEl.appendChild(makeTargetPickerRow(player, player.name, () => {
-          sound.playClick();
-          $('#target-picker-modal').hidden = true;
-          openDealOfferModal(player, context.special || null);
-        }));
-      });
+    // Secret Funding: only the Dirty Politics holders the Money Man can see.
+    const dirtyOnly = context.special === 'funding' ? new Set(localPlayer.intel?.dirtyIds || []) : null;
+    if (dirtyOnly) $('#target-picker-title').textContent = 'Siapa mahu dibiayai? (pemain Dirty Politics)';
+    const candidates = snapshot.players
+      .filter((p) => p.id !== localPlayer.id && p.connected && (!dirtyOnly || dirtyOnly.has(p.id)));
+    if (!candidates.length) {
+      const empty = document.createElement('p');
+      empty.className = 'setting-note';
+      empty.textContent = 'Tiada pemain Dirty Politics lain untuk dibiayai.';
+      listEl.appendChild(empty);
+    }
+    candidates.forEach((player) => {
+      listEl.appendChild(makeTargetPickerRow(player, player.name, () => {
+        sound.playClick();
+        $('#target-picker-modal').hidden = true;
+        openDealOfferModal(player, context.special || null);
+      }));
+    });
     $('#target-picker-modal').hidden = false;
     return;
   }
@@ -1409,6 +1381,15 @@ function getDealSabotajVictims(snapshot, localPlayer, target) {
   });
 }
 
+const DEAL_CONDITION_NAMES = { none: 'Tiada syarat', vote: 'Undi', noharm: 'Jangan serang', sabotage: 'Sabotaj', nopolitik: 'Jangan Politik' };
+const DEAL_CONDITION_TIPS = {
+  none: 'Semua bayaran dibuat sekarang. Tiada apa yang boleh dituntut kemudian.',
+  vote: 'Penerima mesti mengundi seperti yang anda minta dalam sidang Parlimen berikutnya. 50% bayaran ditahan (escrow) dan hanya dilepaskan jika dia patuh.',
+  noharm: 'Penerima tidak boleh menyerang anda sepanjang tempoh kontrak. 50% bayaran ditahan dan dilepaskan hanya jika dia patuh.',
+  sabotage: 'Penerima mesti menyabotaj pesaing yang anda pilih dalam tempoh kontrak. 50% bayaran ditahan sehingga dia melakukannya.',
+  nopolitik: 'Penerima tidak boleh berebut kerusi yang sama dengan anda. 50% bayaran ditahan dan dilepaskan jika dia patuh.',
+};
+
 function setupDealConditionPicker(snapshot, localPlayer, target) {
   const select = $('#deal-offer-condition');
   const param = $('#deal-offer-condition-param');
@@ -1432,9 +1413,29 @@ function setupDealConditionPicker(snapshot, localPlayer, target) {
     opt.value = o.value;
     opt.textContent = o.label;
     opt.disabled = Boolean(o.disabled);
+    opt.title = DEAL_CONDITION_TIPS[o.value] || '';
     select.appendChild(opt);
   });
   select.value = 'none';
+  select.title = DEAL_CONDITION_TIPS.none;
+  const tips = $('#deal-offer-condition-tips');
+  if (tips) {
+    tips.innerHTML = '';
+    options.forEach((o) => {
+      const line = document.createElement('p');
+      const b = document.createElement('b');
+      b.textContent = `${DEAL_CONDITION_NAMES[o.value]}: `;
+      line.appendChild(b);
+      line.appendChild(document.createTextNode(DEAL_CONDITION_TIPS[o.value]));
+      tips.appendChild(line);
+    });
+    const exposeLine = document.createElement('p');
+    const eb = document.createElement('b');
+    eb.textContent = 'Dedahkan: ';
+    exposeLine.appendChild(eb);
+    exposeLine.appendChild(document.createTextNode('Jika penerima mungkir syarat, anda boleh mendedahkannya (percuma, sentiasa berjaya). Dia dikenakan penalti dan deal menjadi berita awam.'));
+    tips.appendChild(exposeLine);
+  }
 
   const refresh = () => {
     param.innerHTML = '';
@@ -2711,7 +2712,12 @@ function wireMatchEvents() {
   initCharacterUi({
     showToast,
     pushFeed,
-    openDeal: (special) => openTargetPicker({ mode: 'deal', special }),
+    openDeal: (special, targetId) => {
+      const snapshot = match.getMatchSnapshot();
+      const target = targetId ? snapshot.players.find((p) => p.id === targetId) : null;
+      if (target) openDealOfferModal(target, special || null);
+      else openTargetPicker({ mode: 'deal', special });
+    },
   });
   bus.on('match:updated', (e) => renderMatchScreen(e.detail));
   bus.on('match:offers', (e) => {

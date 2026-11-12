@@ -69,6 +69,26 @@ export function recordAcceptedDeal({ initiator, recipient, dealType, money, infl
   return { token: copyOf(token), corruption };
 }
 
+// A Kingmaker maneuver (Power Broker, Endorsement, Renew) leaves a hidden Dirty Deal
+// between the Kingmaker and the player it was done with, so an investigator can
+// find it. It costs neither of them Corruption or Public Trust: it is only evidence.
+export function recordManeuverToken({ initiator, recipient, dealType, money = 0, influence = 0, round }) {
+  tokenSeq += 1;
+  const token = {
+    id: `token-${tokenSeq}`,
+    initiatorSlot: initiator.slot,
+    recipientSlot: recipient.slot,
+    dealType,
+    value: { money, influence },
+    round,
+    contractId: null,
+    exposed: false,
+    exposedRound: null,
+  };
+  tokens.push(token);
+  return copyOf(token);
+}
+
 function copyOf(token) {
   return { ...token, value: { ...token.value } };
 }

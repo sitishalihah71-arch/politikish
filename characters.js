@@ -92,7 +92,7 @@ export const CHARACTERS = [
     role: 'Public Scandal Investigator',
     special: {
       name: 'Investigative Report / Media Trial',
-      summary: 'Publish an Investigative Report using an Evidence Token you hold, or put a player on Media Trial by accusing them of being a specific character. One accusation per activation.',
+      summary: 'Investigate a player for a report (their money, Scandal and Public Trust this round, plus any Dirty Deals you may publish), or put a player on Media Trial by accusing them of being a specific character. One accusation per activation.',
       limit: cooldown(2),
       options: [
         { id: 'report', name: 'Investigative Report' },
@@ -109,19 +109,18 @@ export const CHARACTERS = [
     role: 'Political Influence Broker',
     special: {
       name: 'Political Maneuver',
-      summary: 'Pick one maneuver per turn: Power Broker, Official Endorsement, Withdraw/Renew Support, or Bonus Voting Power.',
+      summary: 'Pick one maneuver per turn: Power Broker, Official Endorsement, or Withdraw/Renew Support. Every maneuver leaves a hidden Dirty Deal as evidence.',
       limit: noLimit,
       oncePerTurn: true,
       options: [
         { id: 'powerBroker', name: 'Power Broker', summary: 'Transfer 250-500 Influence to another player.', limit: cooldown(3) },
         { id: 'endorsement', name: 'Official Endorsement', summary: 'Pay 300 Influence: the player gets 300 Influence and +2% Public Trust, and you both gain +100 Influence each turn for 3 rounds.', limit: perGame(1) },
         { id: 'withdrawRenew', name: 'Withdraw/Renew Support', summary: 'Withdraw an active endorsement (they lose 2% Public Trust, announced publicly, no refund) or renew it for 3 more rounds.', limit: noLimit },
-        { id: 'bonusVote', name: 'Bonus Voting Power', summary: 'One extra vote in a Parliament session.', limit: perGame(1) },
       ],
     },
     passive: {
       name: "Kingmaker's Cut",
-      summary: 'Start the game with RM30,000 (the standard RM10,000 plus RM20,000) and 1,000 Influence. +200 Influence after a successful Power Broker transfer (once per transfer).',
+      summary: 'Start the game with RM30,000 (the standard RM10,000 plus RM20,000) and 1,000 Influence. +200 Influence after a successful Power Broker transfer (once per transfer). Bonus Voting Power: every vote you cast in Parliament counts as 2 votes.',
     },
     weakness: { name: 'Political Liability', summary: 'If a player you endorsed is exposed in a scandal while the endorsement is active, you lose 2% Public Trust and 500 Influence (once per endorsement).' },
   },
@@ -132,7 +131,7 @@ export const CHARACTERS = [
     role: 'Secret Political Funder',
     special: {
       name: 'Secret Funding',
-      summary: 'Secretly fund another Dirty Politics player. If they accept, you receive an extra 30% of the amount offered and both of you gain Corruption.',
+      summary: 'You can see which players hold a Dirty Politics character, and you can only fund them. If they accept, you receive an extra 30% of the amount offered and both of you gain Corruption.',
       limit: cooldown(3),
     },
     passive: { name: 'Starting Capital', summary: 'Start the game with an extra RM10,000.' },
@@ -158,7 +157,7 @@ export const CHARACTERS = [
     role: 'Public Campaign Specialist',
     special: {
       name: 'Public Campaign',
-      summary: 'Spend money on a campaign: +20% Public Trust and +100 Influence. The cost is 20% of your money (at least RM5,000).',
+      summary: 'Spend money on a campaign for yourself or another player: +20% Public Trust for them and +100 Influence for you. The cost is 20% of your money (at least RM5,000).',
       limit: cooldown(3),
     },
     passive: { name: 'Public Support', summary: '+3% Public Trust at the start of every round (max 100%).' },
@@ -171,7 +170,7 @@ export const CHARACTERS = [
     role: 'Administrative Control Specialist',
     special: {
       name: 'Falsify Evidence',
-      summary: 'Pick a player: any Evidence about them that a Spy or Journalist sees is forged for the rest of the game. The real record and the real guilt do not change.',
+      summary: 'Pick a player: any Evidence about them that a Spy or Journalist sees is forged for the rest of the game (the other party is replaced by a random name). The real record and the real guilt do not change.',
       limit: perGame(1),
     },
     passive: { name: 'Administrative Efficiency', summary: 'Government-related actions (Projek) are 20% cheaper.' },

@@ -96,13 +96,13 @@ export const GAME_BALANCE = {
     spy: { clues: 2, extraClues: 1 }, // Additional Clue (passive) adds one
     // Defamation (Journalist weakness): a wrong Media Trial. Shield-eligible.
     defamation: { money: 20000, trust: 5 },
-    // A Journalist who publishes a report built on forged evidence: half of it.
-    forgedReport: { money: 10000, trust: 2 },
+    // Media Trial: the accused answers "Betul, diakui" or "Tuduhan salah"; the host checks
+    // the truth. Only the logic of the accusation decides the Journalist's reward or penalty.
     mediaTrial: {
       admitTrust: 5, // accused admits a correct accusation
-      challengeTrust: 10, // accused challenges a correct accusation, the host confirms
-      journalistInfluence: 200, // Public Influence (passive)
-      responseMs: 45000, // no answer counts as a challenge
+      lieTrust: 10, // accused answered against the truth (denied a correct accusation, or admitted a wrong one)
+      journalistInfluence: 200, // Public Influence (passive), only for a correct accusation
+      responseMs: 45000, // no answer counts as denying the accusation
     },
     whistleblower: { exposeTrust: 5, exposeInfluence: 100 },
     // Bureaucrat: Projek has no Money cost to cut, so Administrative Efficiency
@@ -123,7 +123,7 @@ export const GAME_BALANCE = {
       withdrawTrust: 2, // endorsed player loses this when support is withdrawn
       liabilityTrust: 2, // Political Liability: the endorsed player is exposed
       liabilityInfluence: 500,
-      bonusVotes: 1, // Bonus Voting Power: one additional vote, once per game
+      bonusVotes: 1, // Bonus Voting Power (passive): every Parliament vote counts as 1 + this
       // War Chest (passive): the Kingmaker opens the game with RM30,000 in total (the standard
       // RM10,000 plus this) and this much Influence. A copying Opportunist gets it on copying.
       startingMoneyBonus: 20000,
@@ -136,6 +136,7 @@ export const GAME_BALANCE = {
       campaignMinCost: 5000,
       campaignTrust: 20,
       campaignInfluence: 100,
+      campaignOtherTrust: 20, // a campaign run for another player: they get this Public Trust, the Populist the same Influence
       supportTrustPerRound: 3, // Public Support, from round 2 on (was 5; Trust hit the 100% ceiling by round 5)
       scandalExtraTrust: 40, // Scandal Damage, once per exposure
     },

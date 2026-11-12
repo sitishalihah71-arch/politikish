@@ -139,7 +139,7 @@ const mk = (id) => ({ character: { id }, abilityState: {} });
   ok(checkAbilityUse(king, 'special.endorsement', 2).ok, 'endorsement independent of power broker');
   markAbilityUsed(king, 'special.endorsement', 2);
   ok(checkAbilityUse(king, 'special.endorsement', 30).reason === 'limit-reached', 'endorsement once per game');
-  ok(checkAbilityUse(king, 'special.bonusVote', 2).ok, 'bonus vote independent');
+  ok(checkAbilityUse(king, 'special.bonusVote', 2).reason === 'unknown-ability', 'Bonus Voting Power is passive: it is not an ability any more');
 
   const journo = mk('journalist'); // report + media trial share one cooldown
   markAbilityUsed(journo, 'special.report', 4);

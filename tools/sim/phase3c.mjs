@@ -98,7 +98,7 @@ async function exposeVia(t, wbi, target) {
   await wait(10);
   const r = lastOf(t.clients[wbi - 1], 'ability-result', (p) => p.kind === 'investigation' && p.views);
   if (!r || !r.views.length) return false;
-  act(t, wbi, 'follow', { viewId: r.views[0].viewId });
+  act(t, wbi, 'follow', { viewId: r.views[r.views.length - 1].viewId }); // the newest token: the deal, not a maneuver
   await wait(15);
   return true;
 }
@@ -244,6 +244,12 @@ console.log('2. Power Broker');
   act(t, 1, 'special.powerBroker', { targetId: fx.id, amount: 300 });
   await wait(10);
   eq(km.influence, 1000 - 300 + 200, 'sender: -300, +200 once');
+  {
+    const tok = evidence.getTokens().filter((x) => x.dealType === 'powerBroker');
+    eq(tok.length, 1, 'the maneuver leaves one hidden Dirty Deal');
+    ok(tok[0] && [tok[0].initiatorSlot, tok[0].recipientSlot].sort().join() === [km.slot, fx.slot].sort().join(), 'between the Kingmaker and the player involved');
+    eq(inv.hiddenTokenCount(km.slot), 1, 'an investigator counts it as a Dirty Deal');
+  }
   eq(fx.influence, 400, 'recipient: +300');
   ok(notices(t.clients[1], 'power-broker') === 1, 'recipient is notified');
   act(t, 1, 'special.powerBroker', { targetId: fx.id, amount: 300 });
@@ -481,6 +487,27 @@ console.log('5. Populist');
   teardown();
 }
 {
+  // A campaign for another player: they get the Trust, the Populist pays and keeps the Influence.
+  const t = await setup(['bureaucrat', 'populist', 'fixer', 'ally']);
+  const [, pop, fx] = t.players;
+  await t.toTurn(1);
+  pop.money = 50000; pop.influence = 0; fx.approval = 50; fx.influence = 0;
+  act(t, 1, 'special', { targetId: 'nobody' });
+  await wait(5);
+  eq(rejectOf(t.clients[0]), 'invalid-target', 'a campaign for an unknown player is refused');
+  act(t, 1, 'special', { targetId: fx.id });
+  await wait(10);
+  const r = lastOf(t.clients[0], 'ability-result', (p) => p.cost !== undefined);
+  eq(r?.cost, 10000, 'the Populist pays the same cost');
+  eq(r?.forName, fx.name, 'the result names who it was for');
+  eq(pop.money, 40000, 'Populist money spent');
+  eq(pop.approval, 50, "the Populist's own Public Trust does not change");
+  eq(fx.approval, 70, 'the other player gets +20% Public Trust');
+  eq(pop.influence, 100, 'the Populist still earns +100 Influence');
+  ok(lastOf(t.clients[1], 'ability-notice', (p) => p.kind === 'campaign-for-you'), 'the beneficiary is told who campaigned for them');
+  teardown();
+}
+{
   const pop = fake(1, { character: { id: 'populist' }, approval: 98 });
   const other = fake(2, { approval: 50 });
   const out = man.startOfRound(2, [pop, other]);
@@ -529,41 +556,34 @@ console.log('5. Populist');
   teardown();
 }
 
-// ---------- 6. Bonus Voting Power ----------
+// ---------- 6. Bonus Voting Power (passive) ----------
 console.log('6. Bonus Voting Power');
 GAME_BALANCE.parliament.voteDurationMs = 150;
-async function sessionTest(arm, kmVotes) {
+async function sessionTest(kmVotes) {
   const t = await setup(['bureaucrat', 'kingmaker', 'fixer', 'ally'], 5, { parliament: true });
   const [, km] = t.players;
-  act(t, 1, 'special.bonusVote', {});
-  await wait(5);
-  const early = rejectOf(t.clients[0]);
   for (let i = 0; i < 60 && !snap().pendingVote; i += 1) await t.pass();
   ok(snap().pendingVote, 'a session opened');
-  if (arm) { act(t, 1, 'special.bonusVote', {}); await wait(10); }
-  if (arm) { act(t, 1, 'special.bonusVote', {}); await wait(5); }
-  const again = rejectOf(t.clients[0]);
+  act(t, 1, 'special.bonusVote', {});
+  await wait(5);
+  const refused = rejectOf(t.clients[0]);
   if (kmVotes) send(t.clients[0], 'vote-cast', { choice: 'yes' });
   send(t.clients[1], 'vote-cast', { choice: 'no' });
   await wait(400);
   const news = snap().pendingNews;
-  const used = km.abilityState?.['special.bonusVote'] ? true : false;
-  const check = checkAbilityUse(km, 'special.bonusVote', snap().round);
   teardown();
-  return { early, again, news, used, check };
+  return { refused, news };
 }
 {
-  const control = await sessionTest(false, true);
-  eq(control.early, 'no-vote-open', 'no session, no bonus');
-  eq(control.news?.headline, 'MOTION FAILED', 'without the bonus a 1-1 tie fails');
-  const armed = await sessionTest(true, true);
-  eq(armed.news?.headline, 'MOTION PASSED', 'with the bonus 2 vs 1 passes');
-  ok(armed.news?.description.includes('berganda'), 'the tally says one vote counted twice');
-  eq(armed.again, 'already-armed', 'arming twice is refused');
-  eq(armed.check.reason, 'limit-reached', 'spent: once per game');
-  const silent = await sessionTest(true, false);
+  ok(man.voteWeight({ slot: 1, character: { id: 'kingmaker' } }) === 2, 'a Kingmaker vote counts as 2');
+  ok(man.voteWeight({ slot: 1, character: { id: 'opportunist', copiedId: 'kingmaker' } }) === 2, 'so does a copying Opportunist');
+  ok(man.voteWeight({ slot: 1, character: { id: 'ally' } }) === 1 && man.voteWeight({ slot: 1 }) === 1, 'everyone else counts as 1');
+  const silent = await sessionTest(false);
+  eq(silent.refused, 'ability-unavailable', 'there is no Bonus Voting Power button to press any more');
   eq(silent.news?.headline, 'MOTION FAILED', 'a Kingmaker who does not vote gets no extra vote');
-  ok(silent.check.ok, 'and the bonus is not consumed');
+  const voted = await sessionTest(true);
+  eq(voted.news?.headline, 'MOTION PASSED', 'a Kingmaker yes against one no: 2 vs 1 passes, with nothing armed');
+  ok(voted.news?.description.includes('berganda'), "the tally says the Kingmaker's vote counted twice");
 }
 GAME_BALANCE.parliament.voteDurationMs = 90000;
 
@@ -746,7 +766,7 @@ console.log('9. Chaos');
       const target = others[rnd(others.length)];
       seen.add(cid);
       if (cid === 'kingmaker') {
-        const which = ['powerBroker', 'endorsement', 'withdrawRenew', 'bonusVote'][rnd(4)];
+        const which = ['powerBroker', 'endorsement', 'withdrawRenew'][rnd(3)];
         act(t, i, `special.${which}`, { targetId: target.id, amount: 200 + rnd(400), mode: Math.random() < 0.5 ? 'renew' : 'withdraw' });
       } else if (cid === 'populist') act(t, i, 'special', {});
       else if (cid === 'opportunist') {

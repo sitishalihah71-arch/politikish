@@ -136,12 +136,22 @@ console.log('2. Money Man');
   ok(!mmResult, 'the funded player is never told about the perk');
 
   await t.next(0); await t.next(0); await t.next(0); // cooldown 3 rounds
-  mm.money = 30000; clean.money = 5000;
+  mm.money = 30000; clean.money = 5000; dirty2.money = 5000;
+  // Secret Funding only goes to a Dirty Politics player, and the Money Man can see who they are.
+  const snap = match.getMatchSnapshot();
+  const intel = snap.players.find((p) => p.id === snap.localPlayerId).intel;
+  ok(intel && intel.dirtyIds.includes(dirty.id) && intel.dirtyIds.includes(dirty2.id) && !intel.dirtyIds.includes(clean.id), 'the Money Man sees exactly the Dirty Politics players');
+  ok(!snap.players.some((p) => p.id !== snap.localPlayerId && p.intel), "nobody else's intel is in the snapshot");
+  ok(!last(t.clients[0], 'match-update').players.some((p) => p.intel), 'a remote player is never sent intel');
+  rejects.length = 0;
   const o2 = await offer(t, 0, 2, { money: 10000, special: 'funding' });
-  ok(o2 && o2.dealId, 'second funding after the cooldown');
-  await accept(t, 2, o2.dealId);
-  eq(mm.money, 20000, 'a Clean player accepting gives no bonus (silently)');
-  eq(clean.money, 15000, 'but the deal itself still happens');
+  ok(!(o2 && o2.dealId) && rejects.includes('funding-dirty-only'), 'funding a Clean player is refused: Dirty Politics only');
+  rejects.length = 0;
+  const o3 = await offer(t, 0, 3, { money: 10000, special: 'funding' });
+  ok(o3 && o3.dealId, 'second funding, to another Dirty player, after the cooldown');
+  await accept(t, 3, o3.dealId);
+  eq(mm.money, 30000 - 10000 + 3000, 'second funding: +30% again');
+  eq(dirty2.money, 15000, 'the second funded player gets the full amount');
 
   // cap: 100000 offered pays the bonus on 20000 only
   const mmP = { money: 100000, influence: 0 };

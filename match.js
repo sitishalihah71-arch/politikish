@@ -19,15 +19,15 @@ import * as multiplayer from './multiplayer.js';
 import { RANKS, initMatchState, stripPrivateFields } from './player.js';
 import { dealCharacters, getCharacter, getDeck, checkAbilityUse, markAbilityUsed, copyableCharacterIds, copyCharacter, CATEGORY_LABELS } from './characters.js';
 import { characterIdOf, armShield, claimIntegrityBonus } from './abilities.js';
-import { exposeToken, getTokens } from './evidence.js';
+import { exposeToken, getTokens, recordManeuverToken } from './evidence.js';
 import {
   falsify, rollInvestigation, spyReport, SPY_CATEGORIES, buildFullViews, getView, dropViews, hiddenTokenCount, listViewIds, isFalsified,
-  applyForgedReportPenalty, resolveMediaTrial, isCharacterId, dealLabel, noteCategoryClue, categoryClueFor,
+  resolveMediaTrial, isCharacterId, dealLabel, noteCategoryClue, categoryClueFor, viewDetails,
 } from './investigation.js';
 import { applyScandalPenalty, tickPublicSupport, consumeSkipTurn, applyApprovalDelta, adjustBalance } from './effects.js';
 import {
   powerBroker, startEndorsement, withdrawEndorsement, renewEndorsement, endorsementView, startOfRound,
-  armBonusVote, voteWeight, closeBonusVotes, runCampaign, reactToExposure, resetManeuvers, endorsementFor, campaignCost,
+  voteWeight, runCampaign, reactToExposure, resetManeuvers, endorsementFor, campaignCost,
 } from './maneuvers.js';
 import {
   advanceShadowEvents, shadowEventView, investigationModifiers, freeInvestigationAvailable, claimFreeInvestigation,
@@ -170,9 +170,22 @@ function getActivePlayer(players) {
 // The same goes for a player's secret character and ability cooldowns (see
 // player.js's PRIVATE_PLAYER_FIELDS) - except that characters are revealed to
 // everyone once the match is over. Secret Objectives stay masked even then.
+const isDirtyPlayer = (p) => Boolean(p?.character) && getCharacter(characterIdOf(p))?.category === 'dirty';
+
+// What a character knows about the table that is not in the ordinary snapshot:
+// the Money Man sees who holds a Dirty Politics character. Only ever put in the
+// owner's own copy.
+function intelFor(p, players) {
+  if (!charactersMode || !p.character || characterIdOf(p) !== 'moneyMan') return null;
+  return { dirtyIds: players.filter((o) => o.id !== p.id && isDirtyPlayer(o)).map((o) => o.id) };
+}
+
 function maskPlayersFor(players, viewerId) {
   return players.map((p) => {
-    if (p.id === viewerId) return { ...p };
+    if (p.id === viewerId) {
+      const intel = intelFor(p, players);
+      return intel ? { ...p, intel } : { ...p };
+    }
     return stripPrivateFields(p, { keepCharacter: matchOver });
   });
 }
@@ -365,14 +378,13 @@ function resolveVote() {
 
   const vote = pendingVote;
   const players = room.getPlayersLive();
-  // A Kingmaker's armed Bonus Voting Power makes their vote count twice.
+  // A Kingmaker's Bonus Voting Power (passive) makes every vote they cast count twice.
   const tally = (choice) => players.filter((p) => vote.votes[p.id] === choice).reduce((n, p) => n + voteWeight(p), 0);
   const yesCount = tally('yes');
   const noCount = tally('no');
   const castCount = players.filter((p) => vote.votes[p.id] === 'yes' || vote.votes[p.id] === 'no').length;
   const abstainCount = players.length - castCount;
-  const bonusUsed = closeBonusVotes(players, vote.votes);
-  bonusUsed.forEach((p) => markAbilityUsed(p, 'special.bonusVote', currentRound));
+  const bonusUsed = players.filter((p) => voteWeight(p) > 1 && (vote.votes[p.id] === 'yes' || vote.votes[p.id] === 'no'));
   const passed = yesCount > noCount;
 
   const motion = PARLIAMENT_MOTIONS.find((m) => m.id === vote.motionId);
@@ -382,7 +394,7 @@ function resolveVote() {
 
   pendingVote = null;
 
-  const outcomeNote = (motion.type === 'no-confidence' && passed ? ` ${target?.name} is demoted to Ahli Biasa.` : '') + (bonusUsed.length ? ' (satu undi dikira berganda)' : '');
+  const outcomeNote = (motion.type === 'no-confidence' && passed ? ` ${target?.name} is demoted to Ahli Biasa.` : '') + (bonusUsed.length ? ' (undi Kingmaker dikira berganda)' : '');
   postNews({
     icon: '🏛️',
     headline: passed ? 'MOTION PASSED' : 'MOTION FAILED',
@@ -615,7 +627,8 @@ function resolveBotTurn(botId) {
   const special = charactersMode ? botCharacterTurn(bot, players) : null;
   // The Lawyer can never start a deal, so a Lawyer bot does not try.
   const noDeals = charactersMode && characterIdOf(bot) === 'lawyer';
-  const proposal = noDeals ? null : decideDealProposal(bot, players, { voteAhead, force: Boolean(special) });
+  const allowedIds = special && special.special === 'funding' ? players.filter((p) => p.id !== bot.id && isDirtyPlayer(p)).map((p) => p.id) : null;
+  const proposal = noDeals ? null : decideDealProposal(bot, players, { voteAhead, force: Boolean(special), allowedIds });
   if (proposal) {
     hostProposeDeal(bot.id, proposal.targetId, proposal.money, proposal.influence, proposal.condition, () => {}, special ? special.special : null);
   }
@@ -856,6 +869,8 @@ function hostProposeDeal(offererId, targetId, money, influence, condition, respo
   if (special) {
     const needs = special === 'fixer' ? 'fixer' : special === 'funding' ? 'moneyMan' : null;
     if (!charactersMode || !needs || characterIdOf(offerer) !== needs) return reject('ability-unavailable');
+    // Secret Funding only goes to a player holding a Dirty Politics character.
+    if (special === 'funding' && !isDirtyPlayer(target)) return reject('funding-dirty-only');
     const use = checkSpecialUse(offerer);
     if (!use.ok) return reject(use.reason);
   }
@@ -947,10 +962,9 @@ function hostUseAbility(playerId, abilityId, payload, respond) {
   const characterId = characterIdOf(player);
   const ctx = { players, player, payload, reject, abilityId };
 
-  if (abilityId === 'follow' && (characterId === 'journalist' || characterId === 'whistleblower')) return hostFollowUp(ctx);
+  if (abilityId === 'follow' && (characterId === 'journalist' || characterId === 'whistleblower' || characterId === 'spy')) return hostFollowUp(ctx);
   if (abilityId === 'special' && (characterId === 'lawyer' || characterId === 'ally')) return useShield(ctx, characterId);
   if (characterId === 'kingmaker') {
-    if (abilityId === 'special.bonusVote') return useBonusVote(ctx);
     if (abilityId === 'special.powerBroker') return usePowerBroker(ctx);
     if (abilityId === 'special.endorsement') return useEndorsement(ctx);
     if (abilityId === 'special.withdrawRenew') return useWithdrawRenew(ctx);
@@ -996,6 +1010,7 @@ function useFalsify({ players, player, payload, reject, abilityId }) {
   const result = falsify(player, target);
   if (!result.ok) return reject(result.reason);
   spendSpecial(player, abilityId);
+  (player.abilityState ||= {}).falsifiedSlot = target.slot; // the Bureaucrat's own record: who was falsified (private)
   notifyPlayer(player.id, 'ability-result', { abilityId, ok: true, targetId: target.id });
   broadcastMatchUpdate();
 }
@@ -1019,7 +1034,13 @@ function useInvestigation({ players, player, payload, reject, abilityId }, kind)
   const result = { abilityId, ok: true, kind: 'investigation', investigator: kind, targetId: target.id, success };
 
   if (kind === 'spy') {
-    if (success) result.report = spyReport(player, target, payload.category, players, currentRound);
+    if (success) {
+      result.report = spyReport(player, target, payload.category, players, currentRound);
+      // The report can be followed up on a Dirty Deal: "Deal 1", "Deal 2"... (who was in it).
+      if (payload.category === 'corruption' || payload.category === 'deals') {
+        result.deals = buildFullViews('spy', player, target, players, turnKey()).map((v, i) => ({ viewId: v.viewId, dealNo: i + 1 }));
+      }
+    }
     // The target always learns they were looked at; only a blown cover shows who.
     notifyPlayer(target.id, 'ability-notice', {
       kind: 'investigated',
@@ -1027,9 +1048,15 @@ function useInvestigation({ players, player, payload, reject, abilityId }, kind)
       text: success ? 'Seseorang menyiasat anda secara rahsia.' : `${player.name} cuba menyiasat anda secara rahsia tetapi gagal. Penyamaran terbongkar!`,
     });
   } else if (success) {
-    result.views = buildFullViews(kind, player, target, players, turnKey());
+    const full = buildFullViews(kind, player, target, players, turnKey());
+    result.views = kind === 'journalist' ? full.map((v, i) => ({ viewId: v.viewId, dealNo: i + 1 })) : full; // a Journalist never sees who was in a deal
     result.evidenceCount = hiddenTokenCount(target.slot);
     result.publicTrust = target.approval;
+    if (kind === 'journalist') {
+      // The report's own facts, as they stand this round.
+      result.money = target.money;
+      result.scandal = target.scandal;
+    }
     // Investigative Report: a find also narrows down what the target is.
     if (kind === 'journalist' && result.views.length) {
       const category = noteCategoryClue(player.slot, target);
@@ -1042,21 +1069,41 @@ function useInvestigation({ players, player, payload, reject, abilityId }, kind)
 }
 
 // The second half: publish (Journalist) or expose (Whistleblower) one thing
-// found this turn. One per activation. A forged view exposes nothing.
+// found this turn, or look into one Dirty Deal of a Spy's report. One per
+// activation. A forged view gives the Journalist the same report as a genuine
+// one with a random name as the other party; nothing real is exposed.
 function hostFollowUp({ players, player, payload, reject }) {
   if (!charactersMode || !isActivePlayerId(player.id)) return reject('not-your-turn');
   const view = getView(player.slot, payload?.viewId, turnKey());
   if (!view) return reject('view-expired');
-  const isWhistleblower = characterIdOf(player) === 'whistleblower';
+  const kind = characterIdOf(player);
+  const isWhistleblower = kind === 'whistleblower';
   dropViews(player.slot); // one accusation per activation, whatever happens next
 
-  if (view.forged) {
-    const lost = applyForgedReportPenalty(player, players);
+  if (kind === 'spy') {
+    const d = viewDetails(view, players);
+    if (!d) return reject('view-expired');
     notifyPlayer(player.id, 'ability-result', {
-      abilityId: 'follow', ok: true, success: false, forged: true,
-      text: `Laporan anda tidak dapat disahkan. Bukti itu dipalsukan! Anda hilang ${formatMoney(lost.money)} dan ${lost.trust}% kepercayaan awam.`,
+      abilityId: 'follow', ok: true, kind: 'spy-deal',
+      deal: { initiatorName: d.initiatorName, recipientName: d.recipientName, dealLabel: d.dealLabel, money: d.money, influence: d.influence, round: d.round },
     });
-    announceShieldUse(player, lost);
+    broadcastMatchUpdate();
+    return;
+  }
+
+  if (view.forged) {
+    const d = viewDetails(view, players);
+    if (!d) return reject('view-expired');
+    postNews({
+      icon: '🗂️',
+      headline: 'FAIL 101 DIDEDAH',
+      description: `Dokumen sulit bocor: ${d.initiatorName} dan ${d.recipientName} membuat ${d.dealLabel.toLowerCase()} pada ronda ${d.round}.`,
+      feedText: `🗂️ Fail 101: ${d.initiatorName} dan ${d.recipientName} didedahkan!`,
+      feedType: 'news',
+    });
+    const before = player.approval;
+    applyApprovalDelta(player, GAME_BALANCE.shadowPolitics.trustExposeSuccess); // same reward as a real find: it must look the same
+    notifyPlayer(player.id, 'ability-result', { abilityId: 'follow', ok: true, success: true, trust: player.approval - before });
     broadcastMatchUpdate();
     return;
   }
@@ -1121,6 +1168,7 @@ function usePowerBroker({ players, player, payload, reject, abilityId }) {
   const result = powerBroker(player, target, Number(payload?.amount));
   if (!result.ok) return reject(result.reason);
   spendSpecial(player, abilityId);
+  recordManeuverToken({ initiator: player, recipient: target, dealType: 'powerBroker', influence: result.amount, round: currentRound });
   notifyPlayer(player.id, 'ability-result', { abilityId, ok: true, targetId: target.id, amount: result.amount, bonus: result.bonus });
   notifyPlayer(target.id, 'ability-notice', { kind: 'power-broker', text: `Seseorang memindahkan ${result.amount} Influence kepada anda.` });
   maybeCompleteObjective(player);
@@ -1138,6 +1186,7 @@ function useEndorsement({ players, player, payload, reject, abilityId }) {
   if (!result.ok) return reject(result.reason);
   spendSpecial(player, abilityId);
   const k = GAME_BALANCE.characters.kingmaker;
+  recordManeuverToken({ initiator: player, recipient: target, dealType: 'endorsement', influence: k.endorsementCost, round: currentRound });
   postNews({
     icon: '🤝',
     headline: 'SOKONGAN RASMI',
@@ -1160,9 +1209,12 @@ function useWithdrawRenew({ players, player, payload, reject, abilityId }) {
   if (mode !== 'withdraw' && mode !== 'renew') return reject('invalid-mode');
 
   if (mode === 'renew') {
+    const active = endorsementFor(player.slot);
     const result = renewEndorsement(player);
     if (!result.ok) return reject(result.reason);
     spendSpecial(player, abilityId);
+    const endorsed = active && players.find((p) => p.slot === active.targetSlot);
+    if (endorsed) recordManeuverToken({ initiator: player, recipient: endorsed, dealType: 'endorsement', influence: GAME_BALANCE.characters.kingmaker.endorsementCost, round: currentRound });
     notifyPlayer(player.id, 'ability-result', { abilityId, ok: true, mode, expiresRound: result.expiresRound });
     broadcastMatchUpdate();
     return;
@@ -1181,27 +1233,21 @@ function useWithdrawRenew({ players, player, payload, reject, abilityId }) {
   broadcastMatchUpdate();
 }
 
-// Bonus Voting Power: armed during an open Parliament session (any time before
-// it closes, not turn-gated). It is only spent if the Kingmaker then voted.
-function useBonusVote({ player, reject, abilityId }) {
-  if (!charactersMode) return reject('ability-unavailable');
-  if (!pendingVote) return reject('no-vote-open');
-  const check = checkAbilityUse(player, abilityId, currentRound);
-  if (!check.ok) return reject(check.reason);
-  const armed = armBonusVote(player);
-  if (!armed.ok) return reject(armed.reason);
-  notifyPlayer(player.id, 'ability-result', { abilityId, ok: true, armed: true });
-  broadcastMatchUpdate();
-}
-
 // Populist's Public Campaign (private: the result is for the Populist alone).
-function useCampaign({ player, reject, abilityId }) {
+function useCampaign({ players, player, payload, reject, abilityId }) {
   const use = checkSpecialUse(player, abilityId);
   if (!use.ok) return reject(use.reason);
-  const result = runCampaign(player);
+  // For yourself (no target) or for another player.
+  const beneficiary = payload?.targetId && payload.targetId !== player.id ? players.find((p) => p.id === payload.targetId) : player;
+  if (!beneficiary) return reject('invalid-target');
+  const result = runCampaign(player, beneficiary);
   if (!result.ok) return reject(result.reason);
   spendSpecial(player, abilityId);
-  notifyPlayer(player.id, 'ability-result', { abilityId, ok: true, cost: result.cost, trust: result.trust, influence: result.influence });
+  if (result.forOther) {
+    notifyPlayer(beneficiary.id, 'ability-notice', { kind: 'campaign-for-you', text: `${player.name} berkempen untuk anda: +${result.trust}% kepercayaan awam.` });
+    maybeCompleteObjective(beneficiary);
+  }
+  notifyPlayer(player.id, 'ability-result', { abilityId, ok: true, cost: result.cost, trust: result.trust, influence: result.influence, forName: result.forOther ? beneficiary.name : null });
   maybeCompleteObjective(player);
   broadcastMatchUpdate();
 }
@@ -1286,17 +1332,17 @@ function useMediaTrial({ players, player, payload, reject, abilityId }) {
     journalistId: player.id,
     accusedId: accused.id,
     claimedId: claimed.id,
-    timer: setTimeout(() => settleMediaTrial(trialId, false), GAME_BALANCE.characters.mediaTrial.responseMs),
+    timer: setTimeout(() => settleMediaTrial(trialId, false), GAME_BALANCE.characters.mediaTrial.responseMs), // silence counts as denying
   };
   trials.set(trialId, trial);
   notifyPlayer(player.id, 'ability-result', { abilityId, ok: true, targetId: accused.id, trialId, pending: true });
   notifyPlayer(accused.id, 'media-trial', {
     trialId,
-    text: `Seorang wartawan menuduh anda sebagai ${claimed.name}. Akui atau cabar?`,
+    text: `Seorang wartawan menuduh anda sebagai ${claimed.name}. Betul, diakui, atau tuduhan salah? Sistem akan menyemak kebenarannya.`,
     claimedId: claimed.id,
     claimedName: claimed.name,
   });
-  // A bot answers at once and honestly: it admits what is true, challenges what is not.
+  // A bot answers at once and honestly: it admits what is true, denies what is not.
   if (accused.isBot) settleMediaTrial(trialId, characterIdOf(accused) === claimed.id);
   broadcastMatchUpdate();
 }
@@ -1313,23 +1359,55 @@ function settleMediaTrial(trialId, admit) {
 
   const result = resolveMediaTrial(journalist, accused, trial.claimedId, admit, players);
   const claimed = getCharacter(trial.claimedId);
-  if (result.correct) {
+  // What everyone sees follows what the accused said; what the system does
+  // follows the truth. Only a confirmed admission reveals the character.
+  if (result.publicKind === 'revealed') {
     accused.revealedCharacter = claimed.id; // public from now on
     postNews({
       icon: '🎙️',
       headline: 'WATAK RAHSIA DIBONGKAR',
-      description: `Perbicaraan media: ${accused.name} dikenal pasti sebagai ${claimed.name}${admit ? ' selepas mengakuinya' : ' walaupun menafikannya'}. ${accused.name} hilang ${result.accusedTrust}% kepercayaan awam.`,
+      description: `Perbicaraan media: ${accused.name} dikenal pasti sebagai ${claimed.name} selepas mengakuinya. ${accused.name} hilang ${result.accusedTrust}% kepercayaan awam.`,
       feedText: `🎙️ ${accused.name} ialah ${claimed.name}!`,
       feedType: 'news',
     });
-    notifyPlayer(journalist.id, 'ability-notice', { kind: 'trial-won', text: `Tuduhan anda betul. +${result.journalistInfluence} Influence.` });
+  } else if (result.publicKind === 'not-guilty') {
+    postNews({
+      icon: '🎙️',
+      headline: 'TERTUDUH TIDAK MENGAKU BERSALAH',
+      description: `Perbicaraan media: ${accused.name} tidak mengaku bersalah atas tuduhan sebagai ${claimed.name}.`,
+      feedText: `🎙️ ${accused.name} tidak mengaku bersalah.`,
+      feedType: 'news',
+    });
   } else {
+    postNews({
+      icon: '🎙️',
+      headline: 'TUDUHAN BERJAYA DISANGKAL',
+      description: `Perbicaraan media: ${accused.name} berjaya menyangkal tuduhan bahawa dia ialah ${claimed.name}.`,
+      feedText: `🎙️ ${accused.name} menyangkal tuduhan.`,
+      feedType: 'news',
+    });
+  }
+
+  // Privately: the Journalist is rewarded only for a correct accusation, penalised only for a wrong one
+  // the accused rightly denied; the accused is punished for answering against the truth.
+  if (result.correct) {
+    notifyPlayer(journalist.id, 'ability-notice', {
+      kind: 'trial-won',
+      text: result.publicKind === 'revealed'
+        ? `Tuduhan anda betul. +${result.journalistInfluence} Influence.`
+        : `Tuduhan anda betul walaupun ${accused.name} menafikannya: dia ialah ${claimed.name}. +${result.journalistInfluence} Influence. Orang lain tidak tahu.`,
+    });
+    if (!admit) notifyPlayer(accused.id, 'ability-notice', { kind: 'trial-lied', text: `Anda menipu dalam perbicaraan media. Sistem menghukum anda: −${result.accusedTrust}% kepercayaan awam.` });
+  } else if (result.defamation) {
     notifyPlayer(journalist.id, 'ability-notice', {
       kind: 'trial-lost',
       text: `Tuduhan anda salah. Anda hilang ${formatMoney(result.defamation.money)} dan ${result.defamation.trust}% kepercayaan awam.`,
     });
     notifyPlayer(accused.id, 'ability-notice', { kind: 'trial-cleared', text: 'Tuduhan terhadap anda terbukti salah.' });
     announceShieldUse(journalist, result.defamation);
+  } else {
+    notifyPlayer(journalist.id, 'ability-notice', { kind: 'trial-unproven', text: `Tuduhan anda tidak terbukti dan ${accused.name} tidak mengaku bersalah. Anda tidak dihukum.` });
+    notifyPlayer(accused.id, 'ability-notice', { kind: 'trial-lied', text: `Anda mengaku sesuatu yang tidak benar. Sistem menghukum anda: −${result.accusedTrust}% kepercayaan awam.` });
   }
   maybeCompleteObjective(journalist);
   broadcastMatchUpdate();

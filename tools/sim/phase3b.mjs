@@ -112,9 +112,18 @@ console.log('2. Spy');
   const res = lastOf(t.clients[0], 'ability-result', (p) => p.kind === 'investigation');
   ok(res && res.success === true && res.report?.category === 'deals', 'successful investigation returns a deals report');
   eq(res.report.clues.length, 3, 'two clues + the Spy\'s Additional Clue');
-  ok(res.report.clues.some((c) => c.label === 'Rakan' ? c.text === 'H4' || c.text === al.name : true), 'a Rakan clue names the real counterparty');
+  ok(!res.report.clues.some((c) => c.label === 'Rakan' || c.label === 'Peranan'), 'the report itself never names the other party');
   const notice = lastOf(t.clients[1], 'ability-notice', (p) => p.kind === 'investigated');
   ok(notice && notice.by === null, 'the target is told they were investigated, not by whom');
+  ok(res.deals && res.deals.length === 1 && res.deals[0].dealNo === 1 && res.deals[0].viewId, 'a deals report lists the Dirty Deals as Deal 1, Deal 2...');
+  ok(!JSON.stringify(res.deals).includes(al.name), 'the list itself names nobody');
+  act(t, 1, 'follow', { viewId: res.deals[0].viewId });
+  await wait(10);
+  const sd = lastOf(t.clients[0], 'ability-result', (p) => p.kind === 'spy-deal');
+  ok(sd && sd.deal.initiatorName === fx.name && sd.deal.recipientName === al.name, 'looking into Deal 1 shows who was in it (initiator and recipient)');
+  act(t, 1, 'follow', { viewId: res.deals[0].viewId });
+  await wait(10);
+  eq(last(t.clients[0], 'action-rejected')?.reason, 'view-expired', 'one deal looked into per report');
 
   act(t, 1, 'special', { targetId: fx.id, category: 'finance' });
   await wait(10);
@@ -163,6 +172,10 @@ console.log('3. Bureaucrat');
   await wait(10);
   eq(rejects.length, 1, 'Falsify on someone else works');
   ok(inv.isFalsified(fx.slot), 'the target is marked');
+  eq(bu.abilityState.falsifiedSlot, fx.slot, 'the Bureaucrat keeps a private record of who was falsified');
+  const buCopy = match.getMatchSnapshot().players.find((p) => p.id === bu.id);
+  eq(buCopy.abilityState.falsifiedSlot, fx.slot, 'and can read it back from their own snapshot');
+  ok(!last(t.clients[0], 'match-update').players.some((p) => p.abilityState && p.abilityState.falsifiedSlot !== undefined), 'nobody else is ever sent it');
   const secret = JSON.stringify(t.clients.map((c) => c.sent)).includes('forged');
   ok(!secret, 'nobody is told (no client message mentions forgery)');
   await t.next(0); await t.next(0);
@@ -183,8 +196,8 @@ console.log('3. Bureaucrat');
   eq(wbView[0].counterpartyName, al.name, 'the Whistleblower is not fooled');
   eq(evidence.getTokens().find((x) => x.id === real.id).recipientSlot, al.slot, 'the real token never changes');
   eq(inv.hiddenTokenCount(fx.slot), 1, 'token count is never forged');
-  const spyDeal = inv.spyReport(spy, fx, 'deals', t.players, 3).clues.find((c) => c.label === 'Rakan');
-  ok(!spyDeal || spyDeal.text !== al.name, 'the Spy is fooled too');
+  const spyView = inv.buildFullViews('spy', spy, fx, t.players, 'k2')[0];
+  ok(spyView.counterpartyName !== al.name, 'the Spy is fooled too');
 
   // Administrative Efficiency: 20% less Scandal from Projek
   const sBefore = bu.scandal;
@@ -212,6 +225,10 @@ console.log('4. Journalist report');
   eq(inv.categoryClueFor(jo.slot, fx.slot), 'dirty', 'the host remembers the clue (the bots use it)');
   ok(!('character' in r) && !('characterId' in r) && !JSON.stringify(r).includes('fixer'), 'but never which character it is');
   ok(r.views.every((v) => !('forged' in v) && !('tokenId' in v)), 'views leak neither forgery nor the token id');
+  ok(r.views.every((v) => v.dealNo >= 1 && !('counterpartyName' in v) && !('role' in v) && !('dealLabel' in v)), 'a Journalist sees Deal 1, Deal 2... and never who was in them');
+  eq(r.money, fx.money, "the report carries the target's money this round");
+  eq(r.scandal, fx.scandal, "and their Scandal this round");
+  eq(r.publicTrust, fx.approval, "and their Public Trust this round");
   const pt = jo.approval;
   act(t, 1, 'follow', { viewId: r.views[0].viewId });
   await wait(15);
@@ -241,9 +258,12 @@ console.log('4. Journalist report');
   act(t, 1, 'follow', { viewId: r2.views[0].viewId });
   await wait(15);
   const out = lastOf(t.clients[0], 'ability-result', (p) => p.abilityId === 'follow');
-  ok(out && out.success === false && out.forged === true, 'publishing a forged view fails');
-  eq(m0 - jo.money, CFG.forgedReport.money, 'and costs the Journalist half a Defamation (RM10,000)');
-  eq(pt2 - jo.approval, CFG.forgedReport.trust, 'and 2% Public Trust');
+  ok(out && out.success === true && !('forged' in out), 'publishing a forged view looks exactly like a genuine one');
+  eq(jo.money, m0, 'and costs the Journalist nothing');
+  eq(jo.approval, pt2 + 2, 'and pays the same +2 Public Trust, so it cannot be told apart');
+  const fakeNews = match.getMatchSnapshot().pendingNews;
+  ok(fakeNews && fakeNews.headline === 'FAIL 101 DIDEDAH', 'the same Fail 101 story is published');
+  ok(fakeNews.description.includes(fx.name) && !fakeNews.description.includes(al.name), 'but the other party is a random name, never the real one');
   ok(evidence.getTokens().find((x) => x.id === tokenBefore.id).exposed === false, 'the real token is untouched and still hidden');
   teardown();
 }
@@ -327,17 +347,22 @@ console.log('6. Media Trial');
   await wait(10);
   eq(last(t.clients[0], 'action-rejected')?.reason, 'invalid-character', 'unknown character refused');
 
-  // correct + challenge
+  // correct accusation, but the accused denies it: the accused is punished for lying, the Journalist is
+  // still rewarded, and everyone only sees that the accusation was refuted
   act(t, 1, 'special.mediaTrial', { targetId: al.id, characterId: 'ally' });
   await wait(10);
   const p2 = lastOf(t.clients[2], 'media-trial');
-  const ptAl = al.approval;
+  ok(/tuduhan salah/i.test(p2.text) && !/cabar/i.test(p2.text), 'the prompt offers admit or deny, no challenge');
+  const ptAl = al.approval; const infJ = jo.influence;
   send(t.clients[2], 'trial-respond', { trialId: p2.trialId, admit: false });
   await wait(15);
-  eq(al.approval, ptAl - CFG.mediaTrial.challengeTrust, 'correct + challenge: accused −10% Public Trust');
-  eq(al.revealedCharacter, 'ally', 'still revealed: the host confirmed it');
+  eq(al.approval, ptAl - CFG.mediaTrial.lieTrust, 'correct + denied: the accused is punished for lying (−10% Public Trust)');
+  eq(jo.influence, infJ + 200, 'the Journalist is still rewarded: the accusation was right');
+  ok(!al.revealedCharacter, 'nothing is revealed: the public only heard the denial');
+  eq(match.getMatchSnapshot().pendingNews.headline, 'TUDUHAN BERJAYA DISANGKAL', 'everyone sees: the accusation was successfully refuted');
+  ok(lastOf(t.clients[0], 'ability-notice', (p) => p.kind === 'trial-won')?.text.includes('ally') === false && lastOf(t.clients[0], 'ability-notice', (p) => p.kind === 'trial-won')?.text.includes('The Ally'), 'but the Journalist is privately told the truth');
 
-  // wrong accusation: Defamation, accused unharmed, and an admit does not help
+  // wrong accusation, falsely admitted: the accused is punished, the Journalist is not
   await t.next(1); await t.next(1);
   const cap = t.players[3];
   const target = bu;
@@ -356,10 +381,21 @@ console.log('6. Media Trial');
   ok(hostTrials.length === 1, 'the host player also receives a trial prompt');
   match.respondToMediaTrial(hostTrials[0].trialId, true); // admits something false
   await wait(15);
-  eq(m0 - jo.money, CFG.defamation.money, 'wrong accusation: Journalist pays RM20,000');
-  eq(ptJ - jo.approval, CFG.defamation.trust, 'and 5% Public Trust');
-  eq(bu.approval, ptB, 'the accused loses nothing, even if they "admitted"');
+  eq(jo.money, m0, 'wrong accusation but the accused admitted: the Journalist is NOT penalised');
+  eq(jo.approval, ptJ, 'in money or Public Trust');
+  eq(bu.approval, ptB - CFG.mediaTrial.lieTrust, 'the accused is punished for lying (−10% Public Trust)');
   ok(!bu.revealedCharacter, 'nothing is revealed');
+  eq(match.getMatchSnapshot().pendingNews.headline, 'TERTUDUH TIDAK MENGAKU BERSALAH', 'everyone only sees: the accused did not plead guilty');
+
+  // wrong accusation, honestly denied: Defamation, the accused loses nothing
+  await t.next(1); await t.next(1);
+  bu.approval = 50; jo.money = 30000; const m00 = jo.money; const ptJ0 = jo.approval; hostTrials.length = 0;
+  await trialFor(bu, 'lawyer', 0);
+  match.respondToMediaTrial(hostTrials[0].trialId, false);
+  await wait(15);
+  eq(m00 - jo.money, CFG.defamation.money, 'wrong accusation, denied: Journalist pays RM20,000');
+  eq(ptJ0 - jo.approval, CFG.defamation.trust, 'and 5% Public Trust');
+  eq(bu.approval, 50, 'the honest accused loses nothing');
 
   // a Lawyer shield makes Defamation cheaper (it is an eligible penalty)
   await t.next(1); await t.next(1);
@@ -383,8 +419,8 @@ console.log('7. bots and timeouts');
   await t.toTurn(1);
   act(t, 1, 'special.mediaTrial', { targetId: fx.id, characterId: 'fixer' });
   await wait(120);
-  eq(fx.approval, 50 - CFG.mediaTrial.challengeTrust, 'no answer counts as a challenge (confirmed, −10%)');
-  eq(fx.revealedCharacter, 'fixer', 'and the identity comes out');
+  eq(fx.approval, 50 - CFG.mediaTrial.lieTrust, 'no answer counts as denying: punished as a lie (−10%) when the accusation was right');
+  ok(!fx.revealedCharacter, 'and the identity does not come out');
   await t.next(1); await t.next(1);
   al.approval = 50;
   al.isBot = true;
