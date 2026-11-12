@@ -8,7 +8,7 @@
 // Run: NODE_NO_WARNINGS=1 node tools/sim/phase4.mjs [gamesPerCount]
 import { runGame } from './harness.mjs';
 import * as match from '../../match.js';
-import { CHARACTERS } from '../../characters.js';
+import { CHARACTERS, isCharacterActive } from '../../characters.js';
 import { characterIdOf } from '../../abilities.js';
 
 const PER_COUNT = Number(process.argv[2]) || 80;
@@ -66,7 +66,9 @@ console.log('balance preview (wins / fair share, 1.00 = even):');
 Object.keys(seats).sort((a, b) => (wins[b] || 0) / expected[b] - (wins[a] || 0) / expected[a]).forEach((c) => {
   console.log(`  ${c.padEnd(16)} ${((wins[c] || 0) / expected[c]).toFixed(2)}  (${wins[c] || 0} wins in ${seats[c]} seats)`);
 });
-CHARACTERS.forEach((c) => ok(usedBy.has(c.id), `${c.id} was never used by a bot`));
+CHARACTERS.filter((c) => isCharacterActive(c.id)).forEach((c) => ok(usedBy.has(c.id), `${c.id} was never used by a bot`));
+// The hidden cards are never dealt, so they never show up at a table.
+CHARACTERS.filter((c) => !isCharacterActive(c.id)).forEach((c) => ok(!seats[c.id], `${c.id} is hidden: never dealt in ${games} games`));
 ['FAIL 101 DIDEDAH', 'SOKONGAN RASMI'].forEach((h) => ok(headlines.has(h), `no "${h}" news across the soak`));
 
 console.log(failures ? `\nPHASE 4: ${failures} FAILED of ${checks} checks` : `\nPHASE 4: all ${checks} checks passed`);

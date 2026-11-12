@@ -27,6 +27,7 @@ const eq = (a, b, message) => ok(a === b, `${message} (got ${a}, want ${b})`);
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 GAME_BALANCE.backroomDeals.skipNoticeMs = 0;
 GAME_BALANCE.bots.turnDelayMs = 0;
+GAME_BALANCE.characters.disabled = []; // these suites exercise the Lawyer and the Ally, which are hidden in the live deck
 const CFG = GAME_BALANCE.characters;
 
 const rejects = [];
@@ -164,12 +165,30 @@ function reduceFor(player, amount) { return reduce(player, amount, { players: []
   const money = op.money;
   act(t, 1, 'special', { characterId: 'spy' });
   await wait(10);
-  eq(op.money, money, 'copying a Money Man would not give Starting Capital either (no change on copy)');
+  eq(op.money, money, 'copying a non-Money-Man (Spy) changes no money');
   await t.next(1);
   withRandom(0, () => act(t, 1, 'special', { targetId: bu.id, category: 'finance' }));
   await wait(10);
   const rep = lastOf(t.clients[0], 'ability-result', (p) => p.kind === 'investigation');
   ok(rep && rep.success && rep.investigator === 'spy', 'copied Spy investigates on its next turn (fresh cooldown)');
+  teardown();
+}
+{
+  const t = await setup(['bureaucrat', 'opportunist', 'moneyMan', 'whistleblower']);
+  const [, op, mm] = t.players;
+  await t.toTurn(1);
+  const money = op.money;
+  act(t, 1, 'special', { characterId: 'moneyMan' });
+  await wait(10);
+  eq(op.money, money + GAME_BALANCE.characters.moneyManStartingCapital, 'copying the Money Man pays its Starting Capital straight away');
+  const res = lastOf(t.clients[0], 'ability-result', (p) => p.kind === 'copy');
+  eq(res && res.startingCapital, GAME_BALANCE.characters.moneyManStartingCapital, 'the copier is told about the Starting Capital');
+  eq(mm.money, mm.money, 'the real Money Man is untouched');
+  await t.next(1);
+  const beforeSecond = op.money; // turn income arrived in between, so compare around the second attempt only
+  act(t, 1, 'special', { characterId: 'moneyMan' });
+  await wait(10);
+  eq(op.money, beforeSecond, 'Copycat is once per game: no second payment');
   teardown();
 }
 {
@@ -181,6 +200,7 @@ function reduceFor(player, amount) { return reduce(player, amount, { players: []
   const o = await offer(t, 0, 1, { money: 2000 });
   await accept(t, 1, o.dealId);
   eq(evidence.getTokens().length, 0, 'copied weakness: Clean Hands, the Opportunist cannot accept deals');
+  eq(notices(t.clients[0], 'clean-hands'), 1, 'Clean Hands: the refused Whistleblower is told why (no silent rejection)');
   teardown();
 }
 {
@@ -464,12 +484,12 @@ console.log('5. Populist');
   const pop = fake(1, { character: { id: 'populist' }, approval: 98 });
   const other = fake(2, { approval: 50 });
   const out = man.startOfRound(2, [pop, other]);
-  eq(pop.approval, 100, 'Public Support: +5% capped at 100');
+  eq(pop.approval, 100, 'Public Support: +3% capped at 100');
   eq(out.populist[0].trust, 2, 'reports the real gain');
   eq(other.approval, 50, 'nobody else gets it');
   pop.approval = 40;
   man.startOfRound(3, [pop, other]);
-  eq(pop.approval, 45, '+5% each round');
+  eq(pop.approval, 43, '+3% each round (was +5%)');
   man.resetManeuvers();
   const t = await setup(['bureaucrat', 'populist', 'fixer', 'ally']);
   while (snap().round < 4) await t.pass();
@@ -659,11 +679,10 @@ const force = (id) => { ev.resetShadowEvents(); const idx = ev.SHADOW_EVENTS.fin
   teardown();
 }
 {
-  // The deck follows the room setting, the real turn flow draws on schedule, and the public view is shared
+  // Mode Watak's own deck runs whatever the room's ordinary National Events setting says, the real turn flow draws on schedule, and the public view is shared
   const off = await setup(['bureaucrat', 'spy', 'fixer', 'ally'], 3, { events: false });
-  while (snap().round < 5) await off.pass();
-  eq(snap().pendingNews?.headline === undefined || !ev.SHADOW_EVENTS.some((e) => e.name.toUpperCase() === snap().pendingNews.headline), true, 'events off: none drawn');
-  eq(ev.shadowEventView(), null, 'events off: nothing active');
+  while (snap().round < 4) await off.pass();
+  ok(ev.shadowEventView() !== null, 'National Events off: the Shadow deck still draws (round 4)');
   teardown();
   const t = await setup(['bureaucrat', 'spy', 'fixer', 'ally'], 3, { events: true });
   while (snap().round < 4) await t.pass();

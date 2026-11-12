@@ -13,7 +13,7 @@
 // with every match.
 
 import { GAME_BALANCE } from './balance.js';
-import { getCharacter, CHARACTERS } from './characters.js';
+import { getCharacter, CHARACTERS, isCharacterActive } from './characters.js';
 import { getTokens, getTokensInvolving } from './evidence.js';
 import { characterIdOf, reduceMoneyPenalty } from './abilities.js';
 import { adjustBalance, applyApprovalDelta } from './effects.js';
@@ -24,13 +24,25 @@ let forgedSlots = new Set(); // slots whose tokens the Spy / Journalist see forg
 let forgedCopies = new Map(); // tokenId -> the forged fields (same lie every time)
 let views = new Map(); // viewId -> { viewerSlot, tokenId, forged, turnKey }
 let viewSeq = 0;
+let categoryClues = new Map(); // `${journalistSlot}:${targetSlot}` -> the target's character category
 
 export function resetInvestigations() {
   forgedSlots = new Set();
   forgedCopies = new Map();
   views = new Map();
   viewSeq = 0;
+  categoryClues = new Map();
 }
+
+// A successful Investigative Report tells the Journalist which category the
+// target's character is in (Dirty / Clean / Investigation / Flexible), so a
+// later Media Trial is a guess among a few cards, not a blind one.
+export function noteCategoryClue(journalistSlot, target) {
+  const category = getCharacter(characterIdOf(target))?.category || null;
+  if (category) categoryClues.set(`${journalistSlot}:${target.slot}`, category);
+  return category;
+}
+export const categoryClueFor = (journalistSlot, targetSlot) => categoryClues.get(`${journalistSlot}:${targetSlot}`) || null;
 
 const pick = (list) => list[Math.floor(Math.random() * list.length)];
 const roundTo = (n, step) => Math.round(n / step) * step;
@@ -234,7 +246,7 @@ export const applyForgedReportPenalty = (journalist, players) => penalise(journa
 
 // ---------- Media Trial ----------
 
-export const isCharacterId = (id) => CHARACTERS.some((c) => c.id === id);
+export const isCharacterId = (id) => CHARACTERS.some((c) => c.id === id && isCharacterActive(c.id));
 
 // Settles an accusation of identity. `admit` only matters when it is right.
 // Returns { correct, confirmed, accusedTrust, journalistInfluence, defamation }.

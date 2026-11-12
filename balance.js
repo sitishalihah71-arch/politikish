@@ -55,6 +55,9 @@ export const GAME_BALANCE = {
   // in this match", which at 2-3 players would reveal the opponents outright.
   characters: {
     minPlayers: { opportunist: 4 },
+    // Cards kept out of the deck for now (their code and tests stay). The Lawyer's and the
+    // Ally's shields paid out in only 25-33% of games, so they are hidden until reworked.
+    disabled: ['lawyer', 'ally'],
     // Reveal ceremony: at match start every human sees their card (suspense,
     // flip, rules) and the first turn waits until all of them confirmed. The
     // host releases the table after `revealTimeoutMs` even if someone has not,
@@ -121,6 +124,10 @@ export const GAME_BALANCE = {
       liabilityTrust: 2, // Political Liability: the endorsed player is exposed
       liabilityInfluence: 500,
       bonusVotes: 1, // Bonus Voting Power: one additional vote, once per game
+      // War Chest (passive): the Kingmaker opens the game with RM30,000 in total (the standard
+      // RM10,000 plus this) and this much Influence. A copying Opportunist gets it on copying.
+      startingMoneyBonus: 20000,
+      startingInfluence: 1000,
     },
     // Populist (maneuvers.js). Campaign cost = 20% of the Populist's money,
     // never less than the minimum (GDD wording was incomplete, see decisions).
@@ -129,7 +136,7 @@ export const GAME_BALANCE = {
       campaignMinCost: 5000,
       campaignTrust: 20,
       campaignInfluence: 100,
-      supportTrustPerRound: 5, // Public Support, from round 2 on
+      supportTrustPerRound: 3, // Public Support, from round 2 on (was 5; Trust hit the 100% ceiling by round 5)
       scandalExtraTrust: 40, // Scandal Damage, once per exposure
     },
   },
@@ -389,6 +396,7 @@ export const GAME_BALANCE = {
       exposeOfferChance: 60, // a Clean Politician answers an offer by exposing it
       followChance: 80, // publishes / exposes what an investigation found
       mediaTrialChance: 8, // a Journalist gambles on naming a character
+      mediaTrialKnownChance: 60, // ...and far more readily once a report showed that player's category
       falsifyChance: 25,
       shieldChance: 40,
       allyChance: 25,

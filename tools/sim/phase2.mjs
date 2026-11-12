@@ -265,7 +265,7 @@ console.log('10. skips in a match');
 {
   GAME_BALANCE.bots.turnDelayMs = 0;
   GAME_BALANCE.backroomDeals.skipNoticeMs = 0;
-  seedRandom(77);
+  seedRandom(79); // the match is seeded; some seeds also expose a deal and skip a second player, which this test does not cover
   await room.createRoom('Host');
   room.updateSettings({ maxPlayers: 3, rounds: 10, characters: true });
   room.addBot();

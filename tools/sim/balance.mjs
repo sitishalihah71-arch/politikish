@@ -13,7 +13,7 @@
 import fs from 'node:fs';
 import { runGame } from './harness.mjs';
 import { GAME_BALANCE } from '../../balance.js';
-import { CHARACTERS } from '../../characters.js';
+import { CHARACTERS, isCharacterActive } from '../../characters.js';
 import { characterIdOf } from '../../abilities.js';
 
 const argv = process.argv.slice(2);
@@ -30,7 +30,7 @@ function setPath(path, raw) {
 }
 
 function report(t, title) {
-  const ids = CHARACTERS.map((c) => c.id);
+  const ids = CHARACTERS.filter((c) => isCharacterActive(c.id)).map((c) => c.id); // hidden cards are never dealt
   const rows = ids.map((id) => {
     const seats = t.seats[id] || 0;
     const expected = t.expected[id] || 0;

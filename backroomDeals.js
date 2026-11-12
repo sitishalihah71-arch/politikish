@@ -20,7 +20,7 @@
 import { GAME_BALANCE } from './balance.js';
 import { RANK_LABELS, getNextRank } from './player.js';
 import { validateSabotaj } from './sabotage.js';
-import { applyScandalDelta, demoteOneRank } from './effects.js';
+import { applyScandalDelta, demoteOneRank, addSkipTurns } from './effects.js';
 import { recordAcceptedDeal, applyExposedBeforeAccept, markContractExposed, resetEvidence } from './evidence.js';
 import { applyFixerPerk, applyFundingBonus } from './abilities.js';
 import { resetInvestigations } from './investigation.js';
@@ -187,8 +187,9 @@ export function respondToDeal(dealId, accept, players, ctx = {}, rng = Math.rand
   };
 
   if (leaked) {
-    offerer.skipNextTurn = true;
-    target.skipNextTurn = true;
+    // Additive and capped like every other skip, so a leak never erases a longer suspension already pending.
+    addSkipTurns(offerer, cfg.skipTurnsOnLeak, 'bribery-leak');
+    addSkipTurns(target, cfg.skipTurnsOnLeak, 'bribery-leak');
     return { ...base, leaked: true };
   }
 

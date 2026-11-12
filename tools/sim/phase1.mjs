@@ -2,7 +2,8 @@
 // framework, room setting. Run: node tools/sim/phase1.mjs
 import { runGame } from './harness.mjs';
 import * as room from '../../room.js';
-import { CHARACTERS, getDeck, checkAbilityUse, markAbilityUsed, getAbilityStatus, resolveAbilityLimit } from '../../characters.js';
+import { GAME_BALANCE } from '../../balance.js';
+import { CHARACTERS, getDeck, isCharacterActive, activeCharacters, checkAbilityUse, markAbilityUsed, getAbilityStatus, resolveAbilityLimit } from '../../characters.js';
 
 let failures = 0;
 let checks = 0;
@@ -102,8 +103,13 @@ console.log('3. deal is reproducible');
 
 // ---------- 4. Deck size ----------
 console.log('4. deck');
-ok(getDeck(2).length === 11 && getDeck(3).length === 11, 'Opportunist excluded at 2-3 players');
-ok(getDeck(4).length === 12 && getDeck(6).length === 12, 'full deck from 4 players');
+const held = GAME_BALANCE.characters.disabled; // Lawyer and Ally are hidden for now
+ok(held.join() === 'lawyer,ally', 'the Lawyer and the Ally are held back');
+ok(getDeck(2).length === 12 - held.length - 1 && getDeck(3).length === 12 - held.length - 1, 'Opportunist excluded at 2-3 players');
+ok(getDeck(4).length === 12 - held.length && getDeck(6).length === 12 - held.length, 'full deck from 4 players');
+ok([2, 3, 4, 5, 6].every((n) => !getDeck(n).some((c) => held.includes(c.id))), 'no deck ever holds a hidden character');
+ok(!isCharacterActive('lawyer') && !isCharacterActive('ally') && isCharacterActive('fixer'), 'isCharacterActive follows the list');
+ok(activeCharacters().length === 12 - held.length, 'activeCharacters leaves them out');
 
 // ---------- 5. Ability limits ----------
 console.log('5. ability limits');

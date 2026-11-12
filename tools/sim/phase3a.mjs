@@ -22,6 +22,7 @@ const eq = (a, b, message) => ok(a === b, `${message} (got ${a}, want ${b})`);
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 GAME_BALANCE.backroomDeals.skipNoticeMs = 0;
 GAME_BALANCE.bots.turnDelayMs = 0;
+GAME_BALANCE.characters.disabled = []; // these suites exercise the Lawyer and the Ally, which are hidden in the live deck
 
 const rejects = [];
 document.addEventListener('match:action-rejected', (e) => rejects.push(e.detail.reason));
@@ -158,7 +159,9 @@ console.log('2. Money Man');
     const ps = [1, 2, 3, 4, 5].map((n) => { const p = { id: `p${n}`, slot: n }; initMatchState(p); return p; });
     dealCharacters(ps);
     ps.forEach((p) => {
-      if (p.character.id === 'moneyMan') { seen += 1; eq(p.money, 20000, 'Money Man starts with +RM10,000'); } else eq(p.money, 10000, 'everyone else starts with RM10,000');
+      if (p.character.id === 'moneyMan') { seen += 1; eq(p.money, 20000, 'Money Man starts with +RM10,000'); }
+      else if (p.character.id === 'kingmaker') { eq(p.money, 30000, 'Kingmaker starts with RM30,000 in all'); eq(p.influence, 1000, 'Kingmaker starts with 1,000 Influence'); }
+      else { eq(p.money, 10000, 'everyone else starts with RM10,000'); eq(p.influence, 0, 'everyone else starts with no Influence'); }
     });
   }
   ok(seen > 0, 'the Money Man was dealt in some games');

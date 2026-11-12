@@ -38,7 +38,7 @@ export const SHADOW_EVENTS = [
     id: 'parliamentary-inquiry',
     name: 'Parliamentary Inquiry',
     icon: '🏛️',
-    description: 'Parliament opens an inquiry. This round nobody with an open investigation against them may use Legal Defence, Protective Alliance or Falsify Evidence.',
+    description: 'Parliament opens an inquiry. This round the Lawyer, the Ally and the Bureaucrat cannot use their Special if they, or the player they target, hold hidden Evidence.',
   },
 ];
 

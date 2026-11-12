@@ -24,6 +24,7 @@ const eq = (a, b, message) => ok(a === b, `${message} (got ${a}, want ${b})`);
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 GAME_BALANCE.backroomDeals.skipNoticeMs = 0;
 GAME_BALANCE.bots.turnDelayMs = 0;
+GAME_BALANCE.characters.disabled = []; // these suites exercise the Lawyer and the Ally, which are hidden in the live deck
 const CFG = GAME_BALANCE.characters;
 
 const rejects = [];
@@ -206,6 +207,10 @@ console.log('4. Journalist report');
   const r = lastOf(t.clients[0], 'ability-result', (p) => p.kind === 'investigation');
   ok(r.success && r.views.length === 1, 'the Journalist is shown the token');
   eq(r.evidenceCount, 1, 'and how many tokens the target has');
+  eq(r.targetCategory, 'dirty', 'a find also shows the target character category (the Fixer is Dirty Politics)');
+  eq(r.targetCategoryLabel, 'Dirty Politics', 'with its readable label');
+  eq(inv.categoryClueFor(jo.slot, fx.slot), 'dirty', 'the host remembers the clue (the bots use it)');
+  ok(!('character' in r) && !('characterId' in r) && !JSON.stringify(r).includes('fixer'), 'but never which character it is');
   ok(r.views.every((v) => !('forged' in v) && !('tokenId' in v)), 'views leak neither forgery nor the token id');
   const pt = jo.approval;
   act(t, 1, 'follow', { viewId: r.views[0].viewId });
@@ -240,6 +245,21 @@ console.log('4. Journalist report');
   eq(m0 - jo.money, CFG.forgedReport.money, 'and costs the Journalist half a Defamation (RM10,000)');
   eq(pt2 - jo.approval, CFG.forgedReport.trust, 'and 2% Public Trust');
   ok(evidence.getTokens().find((x) => x.id === tokenBefore.id).exposed === false, 'the real token is untouched and still hidden');
+  teardown();
+}
+
+// An empty search tells nothing, so it must not show a category either.
+console.log('4b. Journalist: no find, no clue');
+{
+  const t = await setup(['bureaucrat', 'journalist', 'fixer', 'ally']);
+  const [, jo, fx] = t.players;
+  await t.toTurn(1);
+  withRandom(0, () => act(t, 1, 'special.report', { targetId: fx.id }));
+  await wait(10);
+  const r = lastOf(t.clients[0], 'ability-result', (p) => p.kind === 'investigation');
+  ok(r.success && r.views.length === 0, 'the roll succeeded but the target holds nothing');
+  ok(!('targetCategory' in r), 'so no category is shown');
+  eq(inv.categoryClueFor(jo.slot, fx.slot), null, 'and nothing is remembered');
   teardown();
 }
 

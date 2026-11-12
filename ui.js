@@ -16,7 +16,7 @@ import { GAME_BALANCE } from './balance.js';
 import { getProjekReward } from './projects.js';
 import { buildActionStory } from './stories.js';
 import { describeCondition, getNextVoteRound, splitPayment } from './backroomDeals.js';
-import { CHARACTERS, CATEGORY_LABELS as CHARACTER_CATEGORY_LABELS, getCharacter } from './characters.js';
+import { activeCharacters, CATEGORY_LABELS as CHARACTER_CATEGORY_LABELS, getCharacter } from './characters.js';
 import { initCharacterReveal, getCardArt } from './characterReveal.js';
 import { initCharacterUi, renderCharacterUi, publicCharacterTag, endScreenCharacterLine } from './characterUi.js';
 
@@ -390,6 +390,7 @@ function renderLobby(snapshot) {
     $('#setting-lobby-advanced').setAttribute('aria-checked', String(Boolean(snapshot.settings.advancedMode)));
     $('#setting-row-characters').hidden = !isCharacterModeRevealed();
     $('#setting-lobby-characters').setAttribute('aria-checked', String(Boolean(snapshot.settings.characters)));
+    $('#setting-note-watak-events').hidden = !(isCharacterModeRevealed() && snapshot.settings.characters && !snapshot.settings.nationalEvents);
 
     const canStart = room.canStartMatch();
     const startBtn = $('#btn-lobby-start');
@@ -1033,7 +1034,7 @@ function renderHowtoCharacters() {
   if (section.hidden) return;
   const list = $('#howto-character-list');
   list.innerHTML = '';
-  CHARACTERS.forEach((character) => {
+  activeCharacters().forEach((character) => {
     const card = document.createElement('div');
     card.className = 'howto-character';
     const head = document.createElement('div');
@@ -2746,6 +2747,14 @@ function wireMatchEvents() {
       terms.hidden = false;
     } else {
       terms.hidden = true;
+    }
+    // Whistleblower's weakness (Clean Hands): the host always declines, so don't offer Accept.
+    const me = findLocalPlayer(match.getMatchSnapshot());
+    const cleanHands = Boolean(me?.character) && (me.character.copiedId || me.character.id) === 'whistleblower';
+    $('#btn-deal-accept').hidden = cleanHands;
+    if (cleanHands) {
+      terms.textContent = `${terms.hidden ? '' : `${terms.textContent} `}Tangan Bersih: Whistleblower tidak boleh menerima Backroom Deal. Anda hanya boleh menolak.`;
+      terms.hidden = false;
     }
     // Chat with the offerer before deciding. Collapsed unless they already wrote.
     const mount = $('#deal-incoming-chat');

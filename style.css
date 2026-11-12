@@ -7191,3 +7191,6 @@ body.cr-open {
   #screen-lobby .lobby-bot-remove { width: 34px; height: 34px; flex: none; }
   #screen-lobby .lobby-player-info { min-width: 0; flex: 1 1 auto; }
 }
+
+/* .menu-btn sets display:flex, which would beat the [hidden] attribute (Whistleblower: no Accept button). */
+#btn-deal-accept[hidden] { display: none; }

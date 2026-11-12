@@ -17,12 +17,12 @@ import { bus, formatMoney } from './utils.js';
 import * as room from './room.js';
 import * as multiplayer from './multiplayer.js';
 import { RANKS, initMatchState, stripPrivateFields } from './player.js';
-import { dealCharacters, getCharacter, getDeck, checkAbilityUse, markAbilityUsed, copyableCharacterIds, copyCharacter } from './characters.js';
+import { dealCharacters, getCharacter, getDeck, checkAbilityUse, markAbilityUsed, copyableCharacterIds, copyCharacter, CATEGORY_LABELS } from './characters.js';
 import { characterIdOf, armShield, claimIntegrityBonus } from './abilities.js';
 import { exposeToken, getTokens } from './evidence.js';
 import {
   falsify, rollInvestigation, spyReport, SPY_CATEGORIES, buildFullViews, getView, dropViews, hiddenTokenCount, listViewIds, isFalsified,
-  applyForgedReportPenalty, resolveMediaTrial, isCharacterId, dealLabel,
+  applyForgedReportPenalty, resolveMediaTrial, isCharacterId, dealLabel, noteCategoryClue, categoryClueFor,
 } from './investigation.js';
 import { applyScandalPenalty, tickPublicSupport, consumeSkipTurn, applyApprovalDelta, adjustBalance } from './effects.js';
 import {
@@ -580,6 +580,10 @@ function botCharacterTurn(bot, players) {
     revealedIds: new Set(players.map((p) => p.revealedCharacter).filter(Boolean)),
     trialPendingIds: new Set([...trials.values()].map((t) => t.accusedId)),
     deckIds: getDeck(players.length).map((c) => c.id),
+    categoryClue: (targetId) => {
+      const target = players.find((p) => p.id === targetId);
+      return target ? categoryClueFor(bot.slot, target.slot) : null;
+    },
     hasShield: (bot.abilityState?.shields || []).length > 0,
   };
   const plan = decideBotSpecial(bot, players, ctx);
@@ -1026,6 +1030,12 @@ function useInvestigation({ players, player, payload, reject, abilityId }, kind)
     result.views = buildFullViews(kind, player, target, players, turnKey());
     result.evidenceCount = hiddenTokenCount(target.slot);
     result.publicTrust = target.approval;
+    // Investigative Report: a find also narrows down what the target is.
+    if (kind === 'journalist' && result.views.length) {
+      const category = noteCategoryClue(player.slot, target);
+      result.targetCategory = category;
+      result.targetCategoryLabel = CATEGORY_LABELS[category] || null;
+    }
   }
   notifyPlayer(player.id, 'ability-result', result);
   broadcastMatchUpdate();
@@ -1209,9 +1219,12 @@ function useCopycat({ players, player, payload, reject, abilityId }) {
   }
   if (!options.includes(payload.characterId)) return reject('character-not-in-match');
   spendSpecial(player, abilityId); // the one use of Copycat; the copy then starts fresh
-  copyCharacter(player, payload.characterId);
+  const grant = copyCharacter(player, payload.characterId);
   const copied = getCharacter(payload.characterId);
-  notifyPlayer(player.id, 'ability-result', { abilityId, ok: true, kind: 'copy', characterId: copied.id, characterName: copied.name });
+  notifyPlayer(player.id, 'ability-result', {
+    abilityId, ok: true, kind: 'copy', characterId: copied.id, characterName: copied.name,
+    startingCapital: grant.money, startingInfluence: grant.influence,
+  });
   broadcastMatchUpdate();
 }
 
@@ -1232,8 +1245,9 @@ function runCharacterRoundStart(round, players) {
     notifyPlayer(x.id, 'ability-notice', { kind: 'public-support', text: `Public Support: +${x.trust}% kepercayaan awam.` });
   });
 
-  // The room's National Events setting also governs Mode Watak's own deck.
-  const drawn = room.getRoomSnapshot().settings.nationalEvents ? advanceShadowEvents(round, players) : null;
+  // Mode Watak's own event deck runs whether or not the room's ordinary National Events are on
+  // (with them off, the Money Man's Investigation Risk and the Commission would never exist).
+  const drawn = advanceShadowEvents(round, players);
   if (drawn) {
     const hit = drawn.affected.map((x) => players.find((p) => p.id === x.id)?.name).filter(Boolean);
     postNews({
@@ -1379,7 +1393,10 @@ function dealContext() {
 function hostRespondToDeal(responderId, dealId, accept) {
   const players = room.getPlayersLive();
   // The Whistleblower's weakness (Clean Hands): they can never accept a deal.
-  if (accept && charactersMode && characterIdOf(players.find((p) => p.id === responderId)) === 'whistleblower') accept = false;
+  if (accept && charactersMode && characterIdOf(players.find((p) => p.id === responderId)) === 'whistleblower') {
+    accept = false;
+    notifyPlayer(responderId, 'ability-notice', { kind: 'clean-hands', text: 'Tangan Bersih: Whistleblower tidak boleh menerima Backroom Deal. Tawaran ditolak.' });
+  }
   const result = respondToDeal(dealId, accept, players, dealContext(), Math.random, responderId);
   if (!result.ok) return; // already resolved/expired - nothing to do
 

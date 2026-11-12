@@ -14,7 +14,7 @@ import * as match from './match.js';
 import * as sound from './sound.js';
 import { renderAvatarSVG } from './avatar.js';
 import { GAME_BALANCE } from './balance.js';
-import { CHARACTERS, getCharacter, getAbilityStatus } from './characters.js';
+import { activeCharacters, getCharacter, getAbilityStatus } from './characters.js';
 import { SPY_CATEGORIES } from './investigation.js';
 
 const kcfg = GAME_BALANCE.characters.kingmaker;
@@ -36,6 +36,7 @@ const CATEGORY_HINTS = {
 let hooks = { showToast: () => {}, pushFeed: () => {}, openDeal: () => {} };
 let trialTimer = null;
 let journal = []; // newest first: { round, title, lines }
+let categoryClues = {}; // targetId -> { category, label }: what an Investigative Report showed me
 
 const snap = () => match.getMatchSnapshot();
 const localOf = (s) => s.players.find((p) => p.id === s.localPlayerId) || null;
@@ -146,9 +147,12 @@ const FLOWS = {
       title: 'Perbicaraan Media', kicker: 'Wartawan', intro: 'Tuduh seorang pemain sebagai watak tertentu. Tuduhan salah: anda kena Defamation.',
       onPick: (target) => {
         const box = el('div');
-        box.appendChild(note(`Siapakah ${target.name}?`));
         const me = localOf(snap());
-        const names = CHARACTERS.filter((c) => c.id !== effectiveId(me));
+        const clue = categoryClues[target.id];
+        box.appendChild(note(clue
+          ? `Siapakah ${target.name}? Laporan anda menunjukkan kategorinya: ${clue.label}.`
+          : `Siapakah ${target.name}? Tiada petunjuk lagi. Terbitkan Laporan Penyiasatan dahulu untuk mengetahui kategorinya.`));
+        const names = activeCharacters().filter((c) => c.id !== effectiveId(me) && (!clue || c.category === clue.category));
         box.appendChild(listOf(names.map((c) => choiceRow(c.name, null, () => send('special.mediaTrial', { targetId: target.id, characterId: c.id })))));
         openPower('Pilih watak', 'Wartawan', box);
       },
@@ -399,6 +403,10 @@ function showViews(r) {
   const box = el('div');
   const isJournalist = r.investigator === 'journalist';
   box.appendChild(note(`${nameOf(r.targetId)}: ${r.evidenceCount} rekod tersembunyi · kepercayaan awam ${r.publicTrust}%.`));
+  if (isJournalist && r.targetCategory) {
+    categoryClues[r.targetId] = { category: r.targetCategory, label: r.targetCategoryLabel };
+    box.appendChild(note(`Petunjuk watak: ${nameOf(r.targetId)} ialah watak ${r.targetCategoryLabel}. Berguna untuk Perbicaraan Media.`));
+  }
   if (!r.views.length) {
     box.appendChild(note('Tiada deal tersembunyi untuk didedahkan.'));
   } else {
@@ -449,7 +457,9 @@ function showCopyPicker(options) {
 function onAbilityResult(r) {
   if (r.kind === 'copy-options') return showCopyPicker(r.options || []);
   if (r.kind === 'copy') {
-    hooks.showToast(`Anda kini ialah ${r.characterName}. Kuasanya boleh digunakan pada giliran seterusnya.`, 6000);
+    const gifts = [r.startingCapital ? formatMoney(r.startingCapital) : '', r.startingInfluence ? `${r.startingInfluence} Influence` : ''].filter(Boolean).join(' dan ');
+    const capital = gifts ? ` Anda terima ${gifts} sebagai modal permulaan.` : '';
+    hooks.showToast(`Anda kini ialah ${r.characterName}.${capital} Kuasanya boleh digunakan pada giliran seterusnya.`, 6000);
     sound.playPromotion();
     return undefined;
   }
@@ -551,11 +561,15 @@ export function initCharacterUi(callbacks) {
   bus.on('match:ability-result', (e) => onAbilityResult(e.detail));
   bus.on('match:ability-notice', (e) => onAbilityNotice(e.detail));
   bus.on('match:media-trial', (e) => onMediaTrial(e.detail));
-  bus.on('room:left', () => { journal = []; closePower(); hideTrial(); });
+  bus.on('room:left', () => { journal = []; categoryClues = {}; closePower(); hideTrial(); });
 }
 
 // Called on every match update.
+let lastRoundSeen = 0;
 export function renderCharacterUi(snapshot) {
+  // The round counter going backwards means a new match began: clues about the old one are stale.
+  if (snapshot.round < lastRoundSeen) { categoryClues = {}; }
+  lastRoundSeen = snapshot.round;
   const me = localOf(snapshot);
   const active = Boolean(me?.character);
   $('#character-powers-wrap').hidden = !active;

@@ -57,7 +57,7 @@ export const CHARACTERS = [
       limit: noLimit,
     },
     passive: { name: 'Public Integrity', summary: '+5% Public Trust when you successfully expose corruption (instead of the standard +2%). One exposure reward per round.' },
-    weakness: { name: 'Hypocrisy', summary: 'If a deal you accepted is later exposed, you skip 2 turns instead of 1.' },
+    weakness: { name: 'Hypocrisy', summary: 'If a deal you are part of is later exposed, you skip 2 turns (other players skip 1 as the initiator and none as the recipient).' },
   },
   {
     id: 'whistleblower',
@@ -119,7 +119,10 @@ export const CHARACTERS = [
         { id: 'bonusVote', name: 'Bonus Voting Power', summary: 'One extra vote in a Parliament session.', limit: perGame(1) },
       ],
     },
-    passive: { name: "Kingmaker's Cut", summary: '+200 Influence after a successful Power Broker transfer (once per transfer).' },
+    passive: {
+      name: "Kingmaker's Cut",
+      summary: 'Start the game with RM30,000 (the standard RM10,000 plus RM20,000) and 1,000 Influence. +200 Influence after a successful Power Broker transfer (once per transfer).',
+    },
     weakness: { name: 'Political Liability', summary: 'If a player you endorsed is exposed in a scandal while the endorsement is active, you lose 2% Public Trust and 500 Influence (once per endorsement).' },
   },
   {
@@ -158,7 +161,7 @@ export const CHARACTERS = [
       summary: 'Spend money on a campaign: +20% Public Trust and +100 Influence. The cost is 20% of your money (at least RM5,000).',
       limit: cooldown(3),
     },
-    passive: { name: 'Public Support', summary: '+5% Public Trust at the start of every round (max 100%).' },
+    passive: { name: 'Public Support', summary: '+3% Public Trust at the start of every round (max 100%).' },
     weakness: { name: 'Scandal Damage', summary: 'If you are exposed in a scandal you lose an extra 40% Public Trust.' },
   },
   {
@@ -194,7 +197,7 @@ export const CHARACTERS = [
     role: 'Adaptive Political Player',
     special: {
       name: 'Copycat Politics',
-      summary: 'Pick any character currently in the match and become a copy of them - Special, Passive and Weakness - for the rest of the game.',
+      summary: 'Pick any character currently in the match and become a copy of them - Special, Passive and Weakness - for the rest of the game. Copying the Money Man or the Kingmaker pays out their starting money (and the Kingmaker 1,000 Influence) straight away.',
       limit: perGame(1),
     },
     passive: { name: 'Ability Copy', summary: 'Copied abilities follow their own cooldowns and limits.' },
@@ -227,11 +230,26 @@ export function copyableCharacterIds(opportunist, players) {
 // Becomes a copy of `characterId` for the rest of the game. The copy starts
 // with its own fresh cooldowns and limits (the Opportunist's single use of
 // Copycat is spent); shields and other armed effects stay.
+// Returns the one-off { money, influence } the copy brought with it. A copied
+// Money Man's Starting Capital or Kingmaker's War Chest is paid the moment it
+// is copied, since the copier never "started the game" as one.
 export function copyCharacter(player, characterId) {
   player.character = { id: player.character.id, copiedId: characterId };
   const state = player.abilityState || {};
   Object.keys(state).forEach((key) => { if (key === 'special' || key.startsWith('special.')) delete state[key]; });
   player.abilityState = state;
+  const grant = startingGrant(characterId);
+  player.money += grant.money;
+  player.influence = (player.influence || 0) + grant.influence;
+  return grant;
+}
+
+// What a character's passive hands over at the very start of the game.
+function startingGrant(characterId) {
+  const c = GAME_BALANCE.characters;
+  if (characterId === 'moneyMan') return { money: c.moneyManStartingCapital, influence: 0 };
+  if (characterId === 'kingmaker') return { money: c.kingmaker.startingMoneyBonus, influence: c.kingmaker.startingInfluence };
+  return { money: 0, influence: 0 };
 }
 
 // The characters that can be dealt at this table size. The Opportunist's
@@ -239,19 +257,30 @@ export function copyCharacter(player, characterId) {
 // the opponents' identities outright, so it needs a minimum player count.
 export function getDeck(playerCount) {
   const { minPlayers } = GAME_BALANCE.characters;
-  return CHARACTERS.filter((c) => !minPlayers[c.id] || playerCount >= minPlayers[c.id]);
+  return activeCharacters().filter((c) => !minPlayers[c.id] || playerCount >= minPlayers[c.id]);
+}
+
+// The characters currently in play: everyone except the cards held back in
+// GAME_BALANCE.characters.disabled.
+export function isCharacterActive(id) {
+  return !GAME_BALANCE.characters.disabled.includes(id);
+}
+export function activeCharacters() {
+  return CHARACTERS.filter((c) => isCharacterActive(c.id));
 }
 
 // Deals one distinct character to every player (host-side, at match start).
-// The deck is never shorter than the table (11+ cards vs at most 6 seats).
+// The deck is never shorter than the table (9+ cards vs at most 6 seats).
 export function dealCharacters(players) {
   const deck = shuffle(getDeck(players.length));
   players.forEach((player) => {
     const card = deck.pop();
     player.character = { id: card.id };
     player.abilityState = {};
-    // The Money Man's passive: Starting Capital.
-    if (card.id === 'moneyMan') player.money += GAME_BALANCE.characters.moneyManStartingCapital;
+    // Starting Capital (Money Man) and War Chest (Kingmaker).
+    const grant = startingGrant(card.id);
+    player.money += grant.money;
+    player.influence = (player.influence || 0) + grant.influence;
   });
 }
 

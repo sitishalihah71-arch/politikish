@@ -12,6 +12,7 @@ import { validateSabotaj } from './sabotage.js';
 import { validateMedia } from './media.js';
 import { validateRaid, validateMarketPurchase } from './politicalOpportunities.js';
 import { SPY_CATEGORIES } from './investigation.js';
+import { getCharacter } from './characters.js';
 
 const { bots: cfg } = GAME_BALANCE;
 
@@ -180,7 +181,7 @@ const chance = (pct) => Math.random() * 100 < pct;
 //   characterId, round, ready(abilityId), blocked(target), canFalsify(targetId),
 //   copyOptions[], endorsement ({ targetSlot, renewed } | null), campaignCost,
 //   revealedIds (Set of character ids already public), trialPendingIds (Set of player ids),
-//   deckIds[], hasShield.
+//   deckIds[], categoryClue(targetId) (the character category an Investigative Report showed, or null), hasShield.
 // Returns null, { kind: 'deal', special }, or
 // { abilityId, payload, follow? } - follow: also publish/expose what was found.
 // Every plan is built only from things the host has already said are allowed.
@@ -206,11 +207,18 @@ export function decideBotSpecial(bot, players, ctx) {
         : null;
     case 'journalist': {
       if (!ctx.ready('special.report') || !chance(c.useChance)) return null;
-      if (ctx.ready('special.mediaTrial') && chance(c.mediaTrialChance)) {
-        const accusable = rivals.filter((p) => !p.revealedCharacter && !ctx.trialPendingIds.has(p.id));
+      const accusable = rivals.filter((p) => !p.revealedCharacter && !ctx.trialPendingIds.has(p.id));
+      // A target whose category a report already showed is the one to accuse: the guess is
+      // among that category's few cards instead of the whole deck, so a bot dares much more often.
+      const known = accusable.filter((p) => ctx.categoryClue(p.id));
+      if (ctx.ready('special.mediaTrial') && chance(known.length ? c.mediaTrialKnownChance : c.mediaTrialChance)) {
         const names = ctx.deckIds.filter((id) => id !== ctx.characterId && !ctx.revealedIds.has(id));
-        if (accusable.length && names.length) {
-          return { abilityId: 'special.mediaTrial', payload: { targetId: randomChoice(accusable).id, characterId: randomChoice(names) } };
+        const target = known.length ? randomChoice(known) : (accusable.length ? randomChoice(accusable) : null);
+        const clue = target ? ctx.categoryClue(target.id) : null;
+        const narrowed = clue ? names.filter((id) => getCharacter(id)?.category === clue) : names;
+        const pool = narrowed.length ? narrowed : names;
+        if (target && pool.length) {
+          return { abilityId: 'special.mediaTrial', payload: { targetId: target.id, characterId: randomChoice(pool) } };
         }
       }
       return { abilityId: 'special.report', payload: { targetId: suspect().id }, follow: true };
