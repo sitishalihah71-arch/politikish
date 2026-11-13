@@ -213,7 +213,9 @@ export function decideBotSpecial(bot, players, ctx) {
       // among that category's few cards instead of the whole deck, so a bot dares much more often.
       const known = accusable.filter((p) => ctx.categoryClue(p.id));
       if (ctx.ready('special.mediaTrial') && chance(known.length ? c.mediaTrialKnownChance : c.mediaTrialChance)) {
-        const names = ctx.deckIds.filter((id) => id !== ctx.characterId && !ctx.revealedIds.has(id));
+        // With one copy of each card, your own card and the ones already revealed cannot be anyone else's.
+        const unique = (ctx.deckCopies || 1) <= 1;
+        const names = ctx.deckIds.filter((id) => unique ? id !== ctx.characterId && !ctx.revealedIds.has(id) : true);
         const target = known.length ? randomChoice(known) : (accusable.length ? randomChoice(accusable) : null);
         const clue = target ? ctx.categoryClue(target.id) : null;
         const narrowed = clue ? names.filter((id) => getCharacter(id)?.category === clue) : names;

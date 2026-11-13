@@ -1558,8 +1558,7 @@ body[data-screen="match"] .global-corner-icons .icon-btn:hover {
 }
 
 .meter-header h4,
-.political-network h4,
-.secret-objective-panel h4 {
+.political-network h4 {
   margin: 0;
   font: 700 13px var(--np-condensed);
   letter-spacing: 0.16em;
@@ -1714,20 +1713,6 @@ body[data-screen="match"] .global-corner-icons .icon-btn:hover {
 }
 
 /* Private to the local player only - same rule as .political-network. */
-.secret-objective-panel {
-  position: relative;
-  margin-top: auto;
-  padding: 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  border: 1.5px dashed var(--ink);
-}
-
-.secret-objective-panel[hidden] {
-  display: none;
-}
-
 .secret-stamp {
   position: absolute;
   top: -11px;
@@ -1739,23 +1724,6 @@ body[data-screen="match"] .global-corner-icons .icon-btn:hover {
   font: 700 14px var(--np-condensed);
   letter-spacing: 0.2em;
   transform: rotate(3deg);
-}
-
-.secret-objective-panel p {
-  margin: 0;
-  font-size: 14px;
-  font-weight: 600;
-}
-
-.secret-objective-status {
-  align-self: flex-start;
-  font: 700 14px var(--np-condensed);
-  letter-spacing: 0.06em;
-  color: var(--ink-4);
-}
-
-.secret-objective-status.is-complete {
-  color: #1d6b3c;
 }
 
 /* --- Action dock --- */

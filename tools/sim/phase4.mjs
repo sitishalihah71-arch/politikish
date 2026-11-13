@@ -69,7 +69,8 @@ Object.keys(seats).sort((a, b) => (wins[b] || 0) / expected[b] - (wins[a] || 0) 
 CHARACTERS.filter((c) => isCharacterActive(c.id)).forEach((c) => ok(usedBy.has(c.id), `${c.id} was never used by a bot`));
 // The hidden cards are never dealt, so they never show up at a table.
 CHARACTERS.filter((c) => !isCharacterActive(c.id)).forEach((c) => ok(!seats[c.id], `${c.id} is hidden: never dealt in ${games} games`));
-['FAIL 101 DIDEDAH', 'SOKONGAN RASMI'].forEach((h) => ok(headlines.has(h), `no "${h}" news across the soak`));
+// A headline only has to appear if the character that makes it is live.
+[['FAIL 101 DIDEDAH', 'journalist'], ['SOKONGAN RASMI', 'kingmaker']].forEach(([h, who]) => ok(!isCharacterActive(who) || headlines.has(h), `no "${h}" news across the soak`));
 
 console.log(failures ? `\nPHASE 4: ${failures} FAILED of ${checks} checks` : `\nPHASE 4: all ${checks} checks passed`);
 process.exit(failures ? 1 : 0);

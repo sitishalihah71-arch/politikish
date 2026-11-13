@@ -268,10 +268,14 @@ export function activeCharacters() {
   return CHARACTERS.filter((c) => isCharacterActive(c.id));
 }
 
-// Deals one distinct character to every player (host-side, at match start).
-// The deck is never shorter than the table (9+ cards vs at most 6 seats).
+// Deals one character card to every player (host-side, at match start). The deck holds
+// `deckCopies` copies of every active card, so with the live six-card deck two players can
+// hold the same character. It is never shorter than the table: extra copies are added if a
+// small config would leave it short.
 export function dealCharacters(players) {
-  const deck = shuffle(getDeck(players.length));
+  const distinct = getDeck(players.length);
+  const copies = Math.max(GAME_BALANCE.characters.deckCopies || 1, Math.ceil(players.length / distinct.length));
+  const deck = shuffle(Array.from({ length: copies }, () => distinct).flat());
   players.forEach((player) => {
     const card = deck.pop();
     player.character = { id: card.id };

@@ -265,9 +265,11 @@ console.log('10. skips in a match');
 {
   GAME_BALANCE.bots.turnDelayMs = 0;
   GAME_BALANCE.backroomDeals.skipNoticeMs = 0;
-  seedRandom(79); // the match is seeded; some seeds also expose a deal and skip a second player, which this test does not cover
+  // Mode Watak stays off here: its Journalist and Clean Politician bots expose deals often, which legitimately
+  // benches other players. This test is only about the one injected skip being used up, one per turn.
+  seedRandom(79);
   await room.createRoom('Host');
-  room.updateSettings({ maxPlayers: 3, rounds: 10, characters: true });
+  room.updateSettings({ maxPlayers: 3, rounds: 10, characters: false });
   room.addBot();
   room.addBot();
   room.setLocalReady(true);

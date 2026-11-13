@@ -55,9 +55,14 @@ export const GAME_BALANCE = {
   // in this match", which at 2-3 players would reveal the opponents outright.
   characters: {
     minPlayers: { opportunist: 4 },
-    // Cards kept out of the deck for now (their code and tests stay). The Lawyer's and the
-    // Ally's shields paid out in only 25-33% of games, so they are hidden until reworked.
-    disabled: ['lawyer', 'ally'],
+    // The live deck is six cards: two each of the Clean Politician (clean), the Fixer (dirty) and the
+    // Journalist (investigation). Every other card is hidden here: its code, tests and art stay so it can
+    // come back by removing it from this list. Hidden cards are never dealt, never shown in How to Play,
+    // and cannot be named in a Media Trial. (The Lawyer's and Ally's shields were already held back:
+    // they paid out in only 25-33% of games.)
+    disabled: ['whistleblower', 'spy', 'kingmaker', 'moneyMan', 'populist', 'bureaucrat', 'opportunist', 'lawyer', 'ally'],
+    // How many copies of each active card go into the deck. 2 means two players can hold the same character.
+    deckCopies: 2,
     // Reveal ceremony: at match start every human sees their card (suspense,
     // flip, rules) and the first turn waits until all of them confirmed. The
     // host releases the table after `revealTimeoutMs` even if someone has not,

@@ -47,7 +47,6 @@ import {
 } from './backroomDeals.js';
 import { recordMessage, getTranscript, resetChats } from './backroomChat.js';
 import { PARLIAMENT_MOTIONS, pickMotion, applyMotion } from './parliament.js';
-import { assignSecretObjective, checkSecretObjective } from './objectives.js';
 import { decideBotAction, decideDealProposal, decideDealResponse, decideBotSpecial, pickBotChatReply } from './bots.js';
 import { GAME_BALANCE } from './balance.js';
 
@@ -169,7 +168,7 @@ function getActivePlayer(players) {
 //
 // The same goes for a player's secret character and ability cooldowns (see
 // player.js's PRIVATE_PLAYER_FIELDS) - except that characters are revealed to
-// everyone once the match is over. Secret Objectives stay masked even then.
+// everyone once the match is over.
 const isDirtyPlayer = (p) => Boolean(p?.character) && getCharacter(characterIdOf(p))?.category === 'dirty';
 
 // What a character knows about the table that is not in the ordinary snapshot:
@@ -452,7 +451,6 @@ function advanceTurn({ skipSupportTick = false } = {}) {
   if (endingPlayer) {
     if (!skipSupportTick) tickPublicSupport(endingPlayer);
     endingPlayer.stats.turnsPlayed += 1;
-    maybeCompleteObjective(endingPlayer);
   }
   lastPenalized = players.filter((p) => applyScandalPenalty(p, players)).map((p) => p.id);
 
@@ -592,6 +590,7 @@ function botCharacterTurn(bot, players) {
     revealedIds: new Set(players.map((p) => p.revealedCharacter).filter(Boolean)),
     trialPendingIds: new Set([...trials.values()].map((t) => t.accusedId)),
     deckIds: getDeck(players.length).map((c) => c.id),
+    deckCopies: GAME_BALANCE.characters.deckCopies || 1,
     categoryClue: (targetId) => {
       const target = players.find((p) => p.id === targetId);
       return target ? categoryClueFor(bot.slot, target.slot) : null;
@@ -681,19 +680,6 @@ function maybeRollKabelUnlock(player, category) {
   if (Math.random() < GAME_BALANCE.politicalNetwork.unlockChancePercent / 100) {
     kabelClaimed = true;
     player.hasKabel = true;
-  }
-}
-
-// Checks (and, if newly met, applies + announces) a player's Secret
-// Objective. Called after every turn-ending action and after a clean
-// Backroom Deal transfer - the only two places a player's Money/Influence
-// change mid-match. Privately notifies just that player (never broadcast,
-// same privacy boundary as Backroom Deals) so the objective and its
-// completion stay masked from everyone else per maskPlayersFor.
-function maybeCompleteObjective(player) {
-  const definition = checkSecretObjective(player);
-  if (definition) {
-    notifyPlayer(player.id, 'objective-complete', { name: definition.name, reward: definition.reward });
   }
 }
 
@@ -1132,9 +1118,7 @@ function hostFollowUp({ players, player, payload, reject }) {
   [a, b].forEach((p) => {
     const lost = p.id === a.id ? result.initiator : result.recipient;
     announceShieldUse(p, lost);
-    maybeCompleteObjective(p);
   });
-  maybeCompleteObjective(player);
   announceExposure([a, b], players);
   broadcastMatchUpdate();
 }
@@ -1171,8 +1155,6 @@ function usePowerBroker({ players, player, payload, reject, abilityId }) {
   recordManeuverToken({ initiator: player, recipient: target, dealType: 'powerBroker', influence: result.amount, round: currentRound });
   notifyPlayer(player.id, 'ability-result', { abilityId, ok: true, targetId: target.id, amount: result.amount, bonus: result.bonus });
   notifyPlayer(target.id, 'ability-notice', { kind: 'power-broker', text: `Seseorang memindahkan ${result.amount} Influence kepada anda.` });
-  maybeCompleteObjective(player);
-  maybeCompleteObjective(target);
   broadcastMatchUpdate();
 }
 
@@ -1195,8 +1177,6 @@ function useEndorsement({ players, player, payload, reject, abilityId }) {
     feedType: 'news',
   });
   notifyPlayer(player.id, 'ability-result', { abilityId, ok: true, targetId: target.id, expiresRound: result.expiresRound });
-  maybeCompleteObjective(player);
-  maybeCompleteObjective(target);
   broadcastMatchUpdate();
 }
 
@@ -1245,10 +1225,8 @@ function useCampaign({ players, player, payload, reject, abilityId }) {
   spendSpecial(player, abilityId);
   if (result.forOther) {
     notifyPlayer(beneficiary.id, 'ability-notice', { kind: 'campaign-for-you', text: `${player.name} berkempen untuk anda: +${result.trust}% kepercayaan awam.` });
-    maybeCompleteObjective(beneficiary);
   }
   notifyPlayer(player.id, 'ability-result', { abilityId, ok: true, cost: result.cost, trust: result.trust, influence: result.influence, forName: result.forOther ? beneficiary.name : null });
-  maybeCompleteObjective(player);
   broadcastMatchUpdate();
 }
 
@@ -1409,7 +1387,6 @@ function settleMediaTrial(trialId, admit) {
     notifyPlayer(journalist.id, 'ability-notice', { kind: 'trial-unproven', text: `Tuduhan anda tidak terbukti dan ${accused.name} tidak mengaku bersalah. Anda tidak dihukum.` });
     notifyPlayer(accused.id, 'ability-notice', { kind: 'trial-lied', text: `Anda mengaku sesuatu yang tidak benar. Sistem menghukum anda: −${result.accusedTrust}% kepercayaan awam.` });
   }
-  maybeCompleteObjective(journalist);
   broadcastMatchUpdate();
 }
 
@@ -1451,8 +1428,6 @@ function hostExposeOffer(responderId, dealId, respond) {
   notifyPlayer(offerer.id, 'deal-result', { accepted: false, exposed: true, role: 'offerer', otherId: target.id });
   notifyPlayer(target.id, 'deal-result', { accepted: false, exposed: true, role: 'target', otherId: offerer.id, integrity });
   announceShieldUse(offerer, cost);
-  maybeCompleteObjective(offerer);
-  maybeCompleteObjective(target);
   announceExposure([offerer], players); // only the offerer is exposed; the Clean Politician is rewarded
   broadcastMatchUpdate();
 }
@@ -1494,12 +1469,6 @@ function hostRespondToDeal(responderId, dealId, accept) {
       headline: 'BREAKING NEWS',
       description: `A secret political deal between ${offerer?.name || 'a politician'} and ${target?.name || 'a politician'} was exposed! Both lose their next turn.`,
     });
-  } else {
-    // A clean transfer is the one place a player's Money/Influence can
-    // change outside their own turn - check both parties' Secret
-    // Objectives here too, not just in advanceTurn().
-    if (offerer) maybeCompleteObjective(offerer);
-    if (target) maybeCompleteObjective(target);
   }
 
   // Deliberately no setLastAction here - deals never generate the usual
@@ -1526,20 +1495,14 @@ function hostRespondToDeal(responderId, dealId, accept) {
   broadcastMatchUpdate();
 }
 
-// Tells each party (privately) what just happened to their contract and
-// re-checks Secret Objectives, since escrow just moved Money/Influence.
+// Tells each party (privately) what just happened to their contract.
 // Safe to call with no events.
 function processContractEvents(events) {
   if (!events.length) return;
-  const players = room.getPlayersLive();
   events.forEach((event) => {
     const detail = { kind: event.kind, contract: event.contract };
     notifyPlayer(event.offererId, 'deal-contract-event', { ...detail, role: 'offerer', otherId: event.targetId });
     notifyPlayer(event.targetId, 'deal-contract-event', { ...detail, role: 'target', otherId: event.offererId });
-    [event.offererId, event.targetId].forEach((id) => {
-      const p = players.find((pl) => pl.id === id);
-      if (p) maybeCompleteObjective(p);
-    });
   });
 }
 
@@ -1563,8 +1526,6 @@ function hostExposeContract(requesterId, contractId) {
     feedText: `🗂️ ${offerer.name} mendedahkan ${target.name} — Pecah Amanah!${penalty.target.ranksLost ? ` ${target.name} jatuh kerusi.` : ''} (+${cfgD.exposeTargetScandal}% Skandal)`,
     feedType: 'news',
   });
-  maybeCompleteObjective(offerer);
-  maybeCompleteObjective(target);
   announceExposure([offerer, target], players);
   notifyPlayer(offerer.id, 'deal-contract-event', { kind: 'exposed', contract: result.contract, role: 'offerer', otherId: target.id });
   notifyPlayer(target.id, 'deal-contract-event', { kind: 'exposed', contract: result.contract, role: 'target', otherId: offerer.id });
@@ -1783,8 +1744,6 @@ function handleClientMatchMessage(type, payload) {
     bus.emit('match:deal-chat', payload);
   } else if (type === 'deal-chat-history') {
     bus.emit('match:deal-chat-history', payload);
-  } else if (type === 'objective-complete') {
-    bus.emit('match:objective-complete', payload);
   } else if (type === 'action-rejected') {
     bus.emit('match:action-rejected', { reason: payload.reason });
   }
@@ -2022,7 +1981,6 @@ bus.on('room:match-started', () => {
     } else {
       dealStartingAssets(players);
     }
-    players.forEach(assignSecretObjective);
     // Mode Watak: each player is dealt a distinct secret character. Skipped
     // entirely when the setting is off, so the match is exactly as before.
     if (roomSnap.settings.characters) dealCharacters(players);

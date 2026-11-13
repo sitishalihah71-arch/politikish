@@ -80,11 +80,6 @@ export function initMatchState(player) {
   player.skipNextTurn = false;
   // Public count of exposed broken Backroom contracts ("Pecah Amanah").
   player.betrayals = 0;
-  // Assigned properly by objectives.js's assignSecretObjective right after
-  // this runs - completely private, masked out of every other player's
-  // view exactly like politicalNetwork/hasKabel above (see match.js's
-  // maskPlayersFor), and never relaxed even at match end.
-  player.secretObjective = null;
   // Character Expansion: dealt by characters.js's dealCharacters only when the
   // room's "Mode Watak" is on, otherwise these stay empty. Both are private.
   player.character = null; // { id } of the secret character
@@ -96,7 +91,7 @@ export function initMatchState(player) {
 // room-level message too (room-update / join-accepted / match-start), because
 // those carry copies of the same live player objects. A character is the one
 // exception: it is revealed to everyone once the match is over.
-export const PRIVATE_PLAYER_FIELDS = ['politicalNetwork', 'hasKabel', 'secretObjective', 'character', 'abilityState'];
+export const PRIVATE_PLAYER_FIELDS = ['politicalNetwork', 'hasKabel', 'character', 'abilityState'];
 
 export function stripPrivateFields(player, { keepCharacter = false } = {}) {
   const copy = { ...player };

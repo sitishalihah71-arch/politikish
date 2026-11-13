@@ -174,7 +174,8 @@ const FLOWS = {
         box.appendChild(note(clue
           ? `Siapakah ${target.name}? Laporan anda menunjukkan kategorinya: ${clue.label}.`
           : `Siapakah ${target.name}? Tiada petunjuk lagi. Terbitkan Laporan Penyiasatan dahulu untuk mengecilkan pilihan, kerana tekaan salah dikenakan Defamation.`));
-        const names = activeCharacters().filter((c) => c.id !== effectiveId(me) && (!clue || c.category === clue.category));
+        const unique = (GAME_BALANCE.characters.deckCopies || 1) <= 1; // with two copies, another player can hold your own card
+        const names = activeCharacters().filter((c) => (!unique || c.id !== effectiveId(me)) && (!clue || c.category === clue.category));
         box.appendChild(listOf(names.map((c) => choiceRow(c.name, CATEGORY_LABELS_BY_ID[c.category], () => send('special.mediaTrial', { targetId: target.id, characterId: c.id })))));
         openPower('Pilih watak', 'Wartawan', box);
       },

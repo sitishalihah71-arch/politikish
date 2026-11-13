@@ -15,7 +15,7 @@ function ok(condition, message) {
   }
 }
 
-const PRIVATE = ['politicalNetwork', 'hasKabel', 'secretObjective', 'character', 'abilityState'];
+const PRIVATE = ['politicalNetwork', 'hasKabel', 'character', 'abilityState'];
 const IDS = new Set(CHARACTERS.map((c) => c.id));
 
 // Walks any message and reports every private field found on a player-like
@@ -62,7 +62,10 @@ for (let n = 2; n <= 6; n += 1) {
     ok(g.settings.characters === true, 'characters setting reaches the snapshot');
     const ids = g.players.map((p) => p.character?.id);
     ok(ids.every((id) => IDS.has(id)), `${n}p seed ${seed}: every player has a valid character`);
-    ok(new Set(ids).size === n, `${n}p seed ${seed}: characters are unique`);
+    const tally = {};
+    ids.forEach((id) => { tally[id] = (tally[id] || 0) + 1; });
+    ok(Object.values(tally).every((k) => k <= GAME_BALANCE.characters.deckCopies), `${n}p seed ${seed}: no card dealt more than ${GAME_BALANCE.characters.deckCopies} times`);
+    if (n === 6) ok(Object.keys(tally).length === 3 && Object.values(tally).every((k) => k === 2), `${n}p seed ${seed}: six players hold exactly two of each of the three characters`);
     if (n < 4) ok(!ids.includes('opportunist'), `${n}p seed ${seed}: no Opportunist below 4 players`);
     ok(g.players.every((p) => p.abilityState && typeof p.abilityState === 'object'), 'abilityState exists');
 
@@ -79,7 +82,6 @@ for (let n = 2; n <= 6; n += 1) {
       });
       const last = [...c.sent].reverse().find((m) => m.type === 'match-update');
       ok(last.payload.players.every((p) => p.character && IDS.has(p.character.id)), 'final update reveals every character');
-      ok(last.payload.players.filter((p) => p.id !== c.peer).every((p) => p.secretObjective === undefined), 'secret objectives stay hidden at match end');
     });
 
     // The host's own screen goes through the same masking.
@@ -103,13 +105,15 @@ console.log('3. deal is reproducible');
 
 // ---------- 4. Deck size ----------
 console.log('4. deck');
-const held = GAME_BALANCE.characters.disabled; // Lawyer and Ally are hidden for now
-ok(held.join() === 'lawyer,ally', 'the Lawyer and the Ally are held back');
-ok(getDeck(2).length === 12 - held.length - 1 && getDeck(3).length === 12 - held.length - 1, 'Opportunist excluded at 2-3 players');
-ok(getDeck(4).length === 12 - held.length && getDeck(6).length === 12 - held.length, 'full deck from 4 players');
+const held = GAME_BALANCE.characters.disabled; // every card except the live three is hidden
+const LIVE = ['cleanPolitician', 'fixer', 'journalist'];
+ok(CHARACTERS.every((c) => LIVE.includes(c.id) !== held.includes(c.id)), 'exactly the Clean Politician, the Fixer and the Journalist are live; every other card is on the hidden list');
+ok(GAME_BALANCE.characters.deckCopies === 2, 'two copies of each live card: a six-card deck');
+ok([2, 3, 4, 5, 6].every((n) => getDeck(n).length === 3 && getDeck(n).every((c) => LIVE.includes(c.id))), 'the deck is the three live characters at every table size');
 ok([2, 3, 4, 5, 6].every((n) => !getDeck(n).some((c) => held.includes(c.id))), 'no deck ever holds a hidden character');
-ok(!isCharacterActive('lawyer') && !isCharacterActive('ally') && isCharacterActive('fixer'), 'isCharacterActive follows the list');
-ok(activeCharacters().length === 12 - held.length, 'activeCharacters leaves them out');
+ok(!isCharacterActive('opportunist') && !isCharacterActive('spy') && isCharacterActive('fixer'), 'isCharacterActive follows the list');
+ok(activeCharacters().length === 3, 'activeCharacters leaves the hidden cards out');
+ok(CHARACTERS.length === 12, 'the hidden characters are still in the code');
 
 // ---------- 5. Ability limits ----------
 console.log('5. ability limits');

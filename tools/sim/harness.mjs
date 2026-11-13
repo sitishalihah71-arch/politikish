@@ -55,7 +55,6 @@ function fingerprintOf(players, snapshot) {
         slot: p.slot, rank: p.rank, money: p.money, influence: p.influence, scandal: p.scandal,
         approval: p.approval, betrayals: p.betrayals, stats: p.stats,
         assets: p.assets.map((a) => a.type).sort(),
-        objective: p.secretObjective ? `${p.secretObjective.id}:${p.secretObjective.completed}` : null,
       })),
   };
   return crypto.createHash('sha1').update(JSON.stringify(data)).digest('hex').slice(0, 12);

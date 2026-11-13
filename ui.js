@@ -11,7 +11,6 @@ import { hasOpenSeat } from './effects.js';
 import * as politics from './politics.js';
 import * as sabotage from './sabotage.js';
 import * as opportunities from './politicalOpportunities.js';
-import { SECRET_OBJECTIVES } from './objectives.js';
 import { GAME_BALANCE } from './balance.js';
 import { getProjekReward } from './projects.js';
 import { buildActionStory } from './stories.js';
@@ -919,7 +918,6 @@ function renderActionPanel(snapshot) {
   renderActionChips(localPlayer, snapshot);
   renderStatusAssets(localPlayer);
   renderPoliticalNetwork(localPlayer);
-  renderSecretObjective(localPlayer);
 }
 
 // The action cards advertise what they'd cost right now (a base attempt with
@@ -951,29 +949,6 @@ function renderActionChips(localPlayer, snapshot) {
   }
 }
 
-// Secret Objective data only ever appears on the local player's own entry
-// (see match.js's maskPlayersFor, which strips it exactly like
-// politicalNetwork/hasKabel) - this panel is never rendered for anyone
-// else's data, by construction.
-function renderSecretObjective(localPlayer) {
-  const panel = $('#secret-objective-panel');
-  if (!localPlayer || !localPlayer.secretObjective) {
-    panel.hidden = true;
-    return;
-  }
-  const definition = SECRET_OBJECTIVES.find((o) => o.id === localPlayer.secretObjective.id);
-  if (!definition) {
-    panel.hidden = true;
-    return;
-  }
-  panel.hidden = false;
-  $('#secret-objective-description').textContent = definition.description;
-  const statusEl = $('#secret-objective-status');
-  const completed = localPlayer.secretObjective.completed;
-  statusEl.textContent = completed ? 'Selesai' : 'Belum selesai';
-  statusEl.classList.toggle('is-complete', completed);
-}
-
 let shownCharacterId = null;
 
 function renderCharacterPanel(localPlayer) {
@@ -995,6 +970,11 @@ function renderHowtoCharacters() {
   const section = $('#howto-characters');
   section.hidden = !isCharacterModeRevealed();
   if (section.hidden) return;
+  // Rules that only make sense for a hidden character stay out of the page.
+  const active = new Set(activeCharacters().map((c) => c.id));
+  section.querySelectorAll('[data-needs]').forEach((node) => {
+    node.hidden = !node.dataset.needs.split(' ').some((id) => active.has(id));
+  });
   const list = $('#howto-character-list');
   list.innerHTML = '';
   activeCharacters().forEach((character) => {
@@ -1808,12 +1788,6 @@ function makeStatsGrid(player) {
   // Revealed to everyone once the match is over (null/absent when Mode Watak was off).
   const revealed = player.character ? getCharacter(player.character.id) : null;
   if (revealed) rows.push(['Character', revealed.name]);
-  // Only ever present on the local player's own card - secretObjective is
-  // masked out of everyone else's data (see match.js's maskPlayersFor).
-  if (player.secretObjective) {
-    const definition = SECRET_OBJECTIVES.find((o) => o.id === player.secretObjective.id);
-    if (definition) rows.push(['Secret Objective', `${definition.name}${player.secretObjective.completed ? ' ✅' : ''}`]);
-  }
   rows.forEach(([label, value]) => {
     const item = document.createElement('div');
     item.className = 'match-end-stat-item';
@@ -2827,15 +2801,6 @@ function wireMatchEvents() {
     };
     showToast(messages[kind] || 'Kontrak dikemas kini.', 5500);
     if (kind === 'fulfilled') sound.playCoins(); else sound.playWarning();
-  });
-
-  bus.on('match:objective-complete', (e) => {
-    const { name, reward } = e.detail;
-    const parts = [];
-    if (reward?.money) parts.push(formatMoney(reward.money));
-    if (reward?.influence) parts.push(`${reward.influence} Influence`);
-    showToast(`🎯 Objective Complete: ${name}! +${parts.join(' + ')}`, 5000);
-    sound.playPromotion();
   });
 }
 

@@ -77,7 +77,7 @@ function getRoomSnapshot() {
 
 // What may leave this device inside a room-level message. The live player
 // objects are shared with match.js, which hangs private match state on them
-// (secret objective, Kabel, Political Network, character...), so every room
+// (Kabel, Political Network, character...), so every room
 // message sends copies with those stripped - each player gets their own
 // private data only through match.js's personalised match-update.
 function networkPlayers() {
